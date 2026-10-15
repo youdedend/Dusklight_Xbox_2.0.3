@@ -732,10 +732,10 @@ index 896ac85..1b7f4ed 100644
  print('PASS: all requested portable checks completed.')
 diff --git a/tests/uwp/texture_pack_import_test.cpp b/tests/uwp/texture_pack_import_test.cpp
 new file mode 100644
-index 0000000..31ebf62
+index 0000000..a9c3787
 --- /dev/null
 +++ b/tests/uwp/texture_pack_import_test.cpp
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,152 @@
 +#include "dusk/texture_pack_import.hpp"
 +#include <cassert>
 +#include <chrono>
@@ -793,7 +793,11 @@ index 0000000..31ebf62
 +    assert(read(data / "texture_replacements" / "manual.png") == "keep my manual pack");
 +    const auto id = result.directory.filename().string();
 +    assert(packs::valid_pack_id(id));
-+    assert(packs::resolve_directory(data, id) == result.directory);
++    // Windows canonicalization can expand short names/change drive spelling.
++    // Check filesystem identity, not textual spelling of equivalent paths.
++    const auto resolved = packs::resolve_directory(data, id);
++    assert(resolved.filename() == result.directory.filename());
++    assert(fs::equivalent(resolved, result.directory));
 +    for (const auto* bad : {"../escape", "pack-../x", "pack-1/2", "pack--", "pack-1-2-3", "pack-", "pack-123", ""}) {
 +        assert(!packs::valid_pack_id(bad));
 +        assert(packs::resolve_directory(data, bad) == data / "texture_replacements");

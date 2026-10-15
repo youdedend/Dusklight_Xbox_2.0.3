@@ -41,7 +41,7 @@ jobs:
           Git-Checked -C $Game fetch (Join-Path $Inputs 'dusklight.bundle') refs/heads/uwp-2.0.3:refs/heads/uwp-2.0.3
           Git-Checked -C $Game switch uwp-2.0.3
           $GameCommit = (& git -C $Game rev-parse HEAD).Trim()
-          if ($GameCommit -ne '5ea6f987db5f20fdf55befc2ada4f44bf314764f') { throw "Unexpected game commit: $GameCommit" }
+          if ($GameCommit -ne '320ba845ded91da2c5b62fe9121b33bd81351349') { throw "Unexpected game commit: $GameCommit" }
           Git-Checked -C $Game submodule update --init --recursive extern/borealis mods/cosmetics mods/randomizer
           $Aurora = Join-Path $Game 'extern/aurora'
           Git-Checked clone --no-checkout https://github.com/encounter/aurora.git $Aurora
