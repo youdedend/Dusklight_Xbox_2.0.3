@@ -1,0 +1,93 @@
+name: Build UWP candidate (Windows)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-uwp:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out build inputs
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: inputs
+
+      - name: Restore exact unpublished source candidates
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Git-Checked {
+            & git @args
+            if ($LASTEXITCODE -ne 0) { throw "git failed with exit code $LASTEXITCODE" }
+          }
+          $Inputs = Join-Path $env:GITHUB_WORKSPACE 'inputs/ci/port-candidate'
+          foreach ($Name in @('dusklight.bundle', 'aurora.bundle')) {
+            if (-not (Test-Path (Join-Path $Inputs $Name))) { throw "Missing build input: $Name" }
+          }
+          $Game = Join-Path $env:GITHUB_WORKSPACE 'game'
+          Git-Checked clone --branch v2.0.3 --no-recurse-submodules https://github.com/TwilitRealm/dusklight.git $Game
+          Git-Checked -C $Game fetch (Join-Path $Inputs 'dusklight.bundle') refs/heads/uwp-2.0.3:refs/heads/uwp-2.0.3
+          Git-Checked -C $Game switch uwp-2.0.3
+          $GameCommit = (& git -C $Game rev-parse HEAD).Trim()
+          if ($GameCommit -ne 'f8e47623e91d6010cbf6e853580c97294e7ffcc7') { throw "Unexpected game commit: $GameCommit" }
+          Git-Checked -C $Game submodule update --init --recursive extern/borealis mods/cosmetics mods/randomizer
+          $Aurora = Join-Path $Game 'extern/aurora'
+          Git-Checked clone --no-checkout https://github.com/encounter/aurora.git $Aurora
+          Git-Checked -C $Aurora fetch (Join-Path $Inputs 'aurora.bundle') refs/heads/uwp-dusk-2.0.3:refs/heads/uwp-dusk-2.0.3
+          Git-Checked -C $Aurora switch uwp-dusk-2.0.3
+          $AuroraCommit = (& git -C $Aurora rev-parse HEAD).Trim()
+          if ($AuroraCommit -ne '1f2f754aaaaef4010fefa3e3eadbd3dceec4508b') { throw "Unexpected Aurora commit: $AuroraCommit" }
+          Git-Checked -C $Game submodule absorbgitdirs extern/aurora
+          Git-Checked -C $Game submodule status --recursive
+
+      - name: Configure, build and request unsigned AppX
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Log = Join-Path $env:GITHUB_WORKSPACE 'uwp-windows-build.log'
+          Start-Transcript -Path $Log
+          try {
+            $VsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+            $VsPath = (& $VsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+            if (-not $VsPath) { throw 'No Visual Studio C++ toolchain found on the runner.' }
+            & (Join-Path $VsPath 'Common7/Tools/Launch-VsDevShell.ps1') -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+            if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw 'MSVC developer environment initialization failed.' }
+            cmake --version
+            ninja --version
+            & (Join-Path $env:GITHUB_WORKSPACE 'game/platforms/uwp/Build-Uwp.ps1') -GenerateUnsignedPackage
+          } finally {
+            Stop-Transcript
+          }
+
+      - name: Upload diagnostic logs even if the build fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uwp-windows-diagnostics
+          if-no-files-found: warn
+          path: |
+            uwp-windows-build.log
+            game/cmake-build-uwp/CMakeCache.txt
+            game/cmake-build-uwp/CMakeFiles/CMakeConfigureLog.yaml
+            game/cmake-build-uwp/uwp_link_libs_*.txt
+            game/cmake-build-uwp/uwp_dependency_revision.txt
+            game/cmake-build-uwp-host/CMakeCache.txt
+            game/cmake-build-uwp-host/CMakeFiles/CMakeConfigureLog.yaml
+
+      - name: Upload any generated unsigned package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uwp-unsigned-package
+          if-no-files-found: warn
+          path: |
+            game/cmake-build-uwp-host/**/*.appx
+            game/cmake-build-uwp-host/**/*.msix
+            game/cmake-build-uwp-host/**/*.appxbundle
+            game/cmake-build-uwp-host/**/*.msixbundle
