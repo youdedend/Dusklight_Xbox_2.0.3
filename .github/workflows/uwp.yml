@@ -1,0 +1,52 @@
+name: UWP Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - uwp-2.0.3
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-uwp:
+    name: Build UWP (MSVC x86_64)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Enable Visual Studio environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      # msvc-dev-cmd sets VCPKG_ROOT, set it back
+      - name: Override VCPKG_ROOT
+        run: echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
+
+      - name: Install dependencies
+        run: |
+          choco install ninja
+          vcpkg install freetype:x64-windows zstd:x64-windows
+
+      - name: Configure CMake
+        run: cmake --preset windows-msvc-relwithdebinfo-uwp
+
+      - name: Build
+        run: cmake --build --preset windows-msvc-relwithdebinfo-uwp
+
+      - name: Upload build output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dusklight-uwp-msvc-x86_64
+          path: |
+            build/**/*.lib
+            build/**/uwp_link_libs_*.txt
+          if-no-files-found: ignore
