@@ -1,0 +1,67 @@
+name: Sign UWP candidate for sideload testing
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sign-uwp-test.yml'
+      - 'ci/signing/**'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  sign-test-package:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out signing script
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: inputs
+
+      - name: Download successful unsigned build
+        uses: actions/download-artifact@v4
+        with:
+          name: uwp-unsigned-package
+          run-id: 38755945994
+          github-token: ${{ github.token }}
+          path: unsigned
+
+      - name: Create ephemeral certificate, sign and verify
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Start-Transcript -Path (Join-Path $env:GITHUB_WORKSPACE 'uwp-signing.log')
+          try {
+            & (Join-Path $env:GITHUB_WORKSPACE 'inputs/ci/signing/Sign-UwpTest.ps1') `
+              -InputDirectory (Join-Path $env:GITHUB_WORKSPACE 'unsigned') `
+              -OutputDirectory (Join-Path $env:GITHUB_WORKSPACE 'signed')
+          } finally {
+            Stop-Transcript
+          }
+
+      - name: Upload signed package and public certificate only
+        uses: actions/upload-artifact@v4
+        with:
+          name: uwp-signed-test-package
+          if-no-files-found: error
+          path: |
+            signed/Dusklight_2.0.3.0_x64_Test.appx
+            signed/Dusklight-Test.cer
+            signed/Dependencies/x64/*.appx
+            signed/signing-info.json
+            signed/README.txt
+
+      - name: Upload signing diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uwp-signing-diagnostics
+          if-no-files-found: warn
+          path: uwp-signing.log
