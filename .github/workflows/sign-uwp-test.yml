@@ -35,6 +35,7 @@ jobs:
           path: unsigned
 
       - name: Create ephemeral certificate, sign and verify
+        timeout-minutes: 4
         run: |
           $ErrorActionPreference = 'Stop'
           Start-Transcript -Path (Join-Path $env:GITHUB_WORKSPACE 'uwp-signing.log')

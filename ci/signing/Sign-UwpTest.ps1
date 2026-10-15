@@ -45,9 +45,10 @@ $RootTrustPath = $null
 $PeopleTrustPath = $null
 try {
     # The key is non-exportable and stays in this temporary runner's certificate store.
+    Write-Host 'Creating temporary non-exportable test key and certificate.'
     $Certificate = New-SelfSignedCertificate -Type Custom -Subject $Publisher -KeyUsage DigitalSignature `
         -FriendlyName 'Dusklight UWP temporary test signing' -CertStoreLocation 'Cert:\CurrentUser\My' `
-        -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyExportPolicy NonExportable `
+        -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyExportPolicy NonExportable -KeyProtection None `
         -NotAfter (Get-Date).AddYears(1) `
         -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
     $CerPath = Join-Path $OutputDirectory 'Dusklight-Test.cer'
@@ -57,15 +58,20 @@ try {
     # supplied file has the .appx extension commonly used by Xbox Device Portal.
     $SignedPath = Join-Path $OutputDirectory 'Dusklight_2.0.3.0_x64_Test.appx'
     Copy-Item -LiteralPath $Packages[0].FullName -Destination $SignedPath
+    Write-Host 'Signing the AppX container.'
     & $SignTool sign /fd SHA256 /sha1 $Certificate.Thumbprint /s My /v $SignedPath 2>&1 | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { throw "SignTool signing failed: $LASTEXITCODE" }
 
     # Local trust is only for verification on this ephemeral runner; it does not
     # install or trust the certificate on the user's PC or Xbox.
-    Import-Certificate -FilePath $CerPath -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
-    $RootTrustPath = "Cert:\CurrentUser\Root\$($Certificate.Thumbprint)"
-    Import-Certificate -FilePath $CerPath -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
-    $PeopleTrustPath = "Cert:\CurrentUser\TrustedPeople\$($Certificate.Thumbprint)"
+    # Machine-store import on the administrator runner avoids the interactive
+    # CurrentUser Root trust-consent dialog in a headless CI session.
+    Write-Host 'Trusting the public certificate on this temporary runner only.'
+    Import-Certificate -FilePath $CerPath -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
+    $RootTrustPath = "Cert:\LocalMachine\Root\$($Certificate.Thumbprint)"
+    Import-Certificate -FilePath $CerPath -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
+    $PeopleTrustPath = "Cert:\LocalMachine\TrustedPeople\$($Certificate.Thumbprint)"
+    Write-Host 'Verifying the embedded signature and certificate chain.'
     & $SignTool verify /pa /v $SignedPath 2>&1 | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { throw "SignTool verification failed: $LASTEXITCODE" }
 
@@ -142,9 +148,9 @@ requires a securely retained certificate/private key under your control.
     Write-Host "Public certificate thumbprint: $($Certificate.Thumbprint)"
 } finally {
     foreach ($TrustPath in @($RootTrustPath, $PeopleTrustPath)) {
-        if ($TrustPath -and (Test-Path $TrustPath)) { Remove-Item -LiteralPath $TrustPath -Force }
+        if ($TrustPath -and (Test-Path $TrustPath)) { Remove-Item -LiteralPath $TrustPath -Force -Confirm:$false }
     }
     if ($Certificate -and (Test-Path "Cert:\CurrentUser\My\$($Certificate.Thumbprint)")) {
-        Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($Certificate.Thumbprint)" -DeleteKey -Force
+        Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($Certificate.Thumbprint)" -DeleteKey -Force -Confirm:$false
     }
 }
