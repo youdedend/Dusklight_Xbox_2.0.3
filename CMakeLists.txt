@@ -86,6 +86,23 @@ if (DUSK_UWP)
     set(BOREALIS_ENABLE_DISCORD OFF)
 endif ()
 
+# UWP support for aurora (Windows Store detection, WMI gating, card file handling). Applied to the
+# pinned submodule at configure time; skipped if already applied.
+if (DUSK_UWP)
+    set(_aurora_uwp_patch "${CMAKE_SOURCE_DIR}/patches/aurora-uwp.patch")
+    execute_process(COMMAND git apply --reverse --check "${_aurora_uwp_patch}"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/extern/aurora"
+            RESULT_VARIABLE _aurora_uwp_applied OUTPUT_QUIET ERROR_QUIET)
+    if (NOT _aurora_uwp_applied EQUAL 0)
+        execute_process(COMMAND git apply "${_aurora_uwp_patch}"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/extern/aurora"
+                RESULT_VARIABLE _aurora_uwp_result)
+        if (NOT _aurora_uwp_result EQUAL 0)
+            message(FATAL_ERROR "Failed to apply ${_aurora_uwp_patch} to extern/aurora")
+        endif ()
+    endif ()
+endif ()
+
 add_subdirectory(extern/aurora EXCLUDE_FROM_ALL)
 target_compile_definitions(aurora_mtx PRIVATE MTX_USE_PS=1)
 

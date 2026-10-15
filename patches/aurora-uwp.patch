@@ -1,0 +1,1165 @@
+diff --git a/.gitignore b/.gitignore
+index 5418932..6e70b55 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -5,6 +5,7 @@
+ .vscode/
+ .vs/
+ build/
++build-uwp/
+ cmake-build-*/
+ CMakeUserPresets.json
+ out/
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ed3a361..b1db4ab 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -7,6 +7,13 @@ set(CMAKE_C_STANDARD 11)
+ set(CMAKE_CXX_STANDARD 20)
+ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+ 
++set(AURORA_WINDOWS_STORE OFF)
++if (WIN32 AND CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
++  set(AURORA_WINDOWS_STORE ON)
++elseif (WIN32 AND DUSK_UWP)
++  set(AURORA_WINDOWS_STORE ON)
++endif ()
++
+ option(AURORA_ENABLE_GX "Enable GX implementation and WebGPU renderer" ON)
+ option(AURORA_ENABLE_DVD "Enable DVD implementation backed by nod" ON)
+ option(AURORA_ENABLE_CARD "Enable CARD implementation based on kabufuda" ON)
+@@ -16,37 +23,46 @@ option(AURORA_CACHE_USE_ZSTD "Compress WebGPU cache entries with zstd" ON)
+ 
+ include(CMakeDependentOption)
+ cmake_dependent_option(AURORA_ENABLE_EXAMPLES "Enable examples" ON "CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR" OFF)
+-cmake_dependent_option(AURORA_ENABLE_TESTS "Enable tests" ON "NOT CMAKE_CROSSCOMPILING" OFF)
++cmake_dependent_option(AURORA_ENABLE_TESTS "Enable tests" ON "NOT CMAKE_CROSSCOMPILING AND NOT AURORA_WINDOWS_STORE" OFF)
+ 
+ # Dependency versions
+ include(cmake/AuroraDependencyVersions.cmake)
+ 
+ # Platform-specific defaults
+-set(_default_provider "auto")
+-if (WIN32)
++if (AURORA_WINDOWS_STORE)
++  set(_default_provider "auto")
+   set(_default_linkage "shared")
+-else ()
++elseif (CMAKE_CROSSCOMPILING)
++  # Cross-compiling: vendor everything, don't use system packages
++  set(_default_provider "vendor")
+   set(_default_linkage "static")
++else ()
++  set(_default_provider "auto")
++  if (WIN32)
++    set(_default_linkage "shared")
++  else ()
++    set(_default_linkage "static")
++  endif ()
+ endif ()
+ 
+ # Dawn/WebGPU (if AURORA_ENABLE_GX)
+ set(AURORA_DAWN_PROVIDER "${_default_provider}" CACHE STRING
+-  "How to provide Dawn: auto, vendor (build from source), system (find_package/imported), package (download prebuilt)")
+-set_property(CACHE AURORA_DAWN_PROVIDER PROPERTY STRINGS auto vendor system package)
++  "How to provide Dawn: auto, vendor (build from source), system (find_package/imported), package (prebuilt), or uwp_dep (Windows Store only)")
++set_property(CACHE AURORA_DAWN_PROVIDER PROPERTY STRINGS auto vendor system package uwp_dep)
+ set(AURORA_DAWN_LINKAGE "${_default_linkage}" CACHE STRING "Dawn linkage type preference")
+ set_property(CACHE AURORA_DAWN_LINKAGE PROPERTY STRINGS shared static)
+ 
+ # SDL3
+ set(AURORA_SDL3_PROVIDER "${_default_provider}" CACHE STRING
+-  "How to provide SDL3: auto, vendor (build from source), system (find_package/imported), or package (download prebuilt)")
+-set_property(CACHE AURORA_SDL3_PROVIDER PROPERTY STRINGS auto vendor system package)
++  "How to provide SDL3: auto, vendor (build from source), system (find_package/imported), package (prebuilt), or uwp_dep (Windows Store only)")
++set_property(CACHE AURORA_SDL3_PROVIDER PROPERTY STRINGS auto vendor system package uwp_dep)
+ set(AURORA_SDL3_LINKAGE "${_default_linkage}" CACHE STRING "SDL3 linkage type preference")
+ set_property(CACHE AURORA_SDL3_LINKAGE PROPERTY STRINGS shared static)
+ 
+ # nod (if AURORA_ENABLE_DVD)
+ set(AURORA_NOD_PROVIDER "${_default_provider}" CACHE STRING
+-  "How to provide nod: auto, vendor (build from source), system (find_package/imported), package (download prebuilt)")
+-set_property(CACHE AURORA_NOD_PROVIDER PROPERTY STRINGS auto vendor system package)
++  "How to provide nod: auto, vendor (build from source), system (find_package/imported), package (prebuilt), or uwp_dep (Windows Store only)")
++set_property(CACHE AURORA_NOD_PROVIDER PROPERTY STRINGS auto vendor system package uwp_dep)
+ set(AURORA_NOD_LINKAGE "${_default_linkage}" CACHE STRING "nod linkage type preference")
+ set_property(CACHE AURORA_NOD_LINKAGE PROPERTY STRINGS shared static)
+ 
+diff --git a/cmake/AuroraCopyRuntimeDLLs.cmake b/cmake/AuroraCopyRuntimeDLLs.cmake
+index b4fa166..b4851a3 100644
+--- a/cmake/AuroraCopyRuntimeDLLs.cmake
++++ b/cmake/AuroraCopyRuntimeDLLs.cmake
+@@ -18,6 +18,29 @@ function(aurora_copy_runtime_dlls target)
+     )
+   endforeach ()
+ 
++  if (TARGET aurora::uwp_dep)
++    get_target_property(_aurora_libuwp_loc aurora::uwp_dep IMPORTED_LOCATION)
++    if (NOT _aurora_libuwp_loc OR _aurora_libuwp_loc STREQUAL "IMPORTED_LOCATION-NOTFOUND")
++      get_target_property(_aurora_libuwp_loc aurora::uwp_dep IMPORTED_LOCATION_RELEASE)
++    endif ()
++    if (_aurora_libuwp_loc AND NOT _aurora_libuwp_loc STREQUAL "IMPORTED_LOCATION-NOTFOUND" AND EXISTS "${_aurora_libuwp_loc}")
++      cmake_path(GET _aurora_libuwp_loc PARENT_PATH _aurora_uwp_dep_bin)
++      file(GLOB _aurora_uwp_dep_dlls "${_aurora_uwp_dep_bin}/*.dll")
++      if (_aurora_uwp_dep_dlls)
++        set(_aurora_uwp_copy_cmds)
++        foreach (_aurora_uwp_dll IN LISTS _aurora_uwp_dep_dlls)
++          list(APPEND _aurora_uwp_copy_cmds COMMAND ${CMAKE_COMMAND} -E copy_if_different
++              "${_aurora_uwp_dll}" $<TARGET_FILE_DIR:${target}>)
++        endforeach ()
++        add_custom_command(TARGET ${target} POST_BUILD ${_aurora_uwp_copy_cmds})
++        unset(_aurora_uwp_copy_cmds)
++      endif ()
++    endif ()
++    unset(_aurora_libuwp_loc)
++    unset(_aurora_uwp_dep_bin)
++    unset(_aurora_uwp_dep_dlls)
++  endif ()
++
+   # Copy DXC DLLs that Dawn loads via LoadLibrary at runtime
+   if (TARGET dawn::webgpu_dawn)
+     get_target_property(_dawn_loc dawn::webgpu_dawn IMPORTED_LOCATION)
+diff --git a/cmake/AuroraDawnProvider.cmake b/cmake/AuroraDawnProvider.cmake
+index 184d0ee..4fc3049 100644
+--- a/cmake/AuroraDawnProvider.cmake
++++ b/cmake/AuroraDawnProvider.cmake
+@@ -87,10 +87,19 @@ endif ()
+ # ── Auto: resolve provider based on platform availability ──
+ set(_aurora_dawn_provider "${AURORA_DAWN_PROVIDER}")
+ if (_aurora_dawn_provider STREQUAL "auto")
+-  # Prebuilt Dawn packages available for: windows-{amd64,arm64}, linux-{x86_64,aarch64}, darwin-{arm64,x86_64}, ios-arm64, android-aarch64
+-  if (_has_dawn_package)
++  if (DEFINED AURORA_UWP_DEP_ROOT AND EXISTS "${AURORA_UWP_DEP_ROOT}/x64/lib/webgpu_dawn.lib")
++    set(_aurora_dawn_provider "uwp_dep")
++  elseif (_has_dawn_package)
++    if (AURORA_WINDOWS_STORE)
++      message(FATAL_ERROR
++        "aurora: Dawn on UWP requires uwp-dep.")
++    endif ()
+     set(_aurora_dawn_provider "package")
+   else ()
++    if (AURORA_WINDOWS_STORE)
++      message(FATAL_ERROR
++        "aurora: Dawn on UWP requires uwp-dep.")
++    endif ()
+     set(CMAKE_FIND_PACKAGE_TARGETS_GLOBAL ON)
+     find_package(Dawn QUIET)
+     set(CMAKE_FIND_PACKAGE_TARGETS_GLOBAL OFF)
+@@ -252,9 +261,35 @@ elseif (_aurora_dawn_provider STREQUAL "package")
+     set(AURORA_DAWN_IS_SHARED FALSE)
+   endif ()
+ 
++elseif (_aurora_dawn_provider STREQUAL "uwp_dep")
++  if (NOT DEFINED AURORA_UWP_DEP_ROOT OR NOT EXISTS "${AURORA_UWP_DEP_ROOT}/x64/lib/webgpu_dawn.lib")
++    message(FATAL_ERROR "aurora: AURORA_DAWN_PROVIDER=uwp_dep requires uwp-dep x64/lib/webgpu_dawn.lib.")
++  endif ()
++  message(STATUS "aurora: Using Dawn/WebGPU from uwp-dep (${AURORA_UWP_DEP_ROOT})")
++  set(_uwp_x64 "${AURORA_UWP_DEP_ROOT}/x64")
++  if (NOT TARGET dawn_webgpu_uwp_depot)
++    add_library(dawn_webgpu_uwp_depot SHARED IMPORTED GLOBAL)
++    set_target_properties(dawn_webgpu_uwp_depot PROPERTIES
++      IMPORTED_LOCATION "${_uwp_x64}/bin/webgpu_dawn.dll"
++      IMPORTED_IMPLIB "${_uwp_x64}/lib/webgpu_dawn.lib"
++      INTERFACE_INCLUDE_DIRECTORIES "${_uwp_x64}/include"
++    )
++  endif ()
++  if (NOT TARGET dawn::webgpu_dawn)
++    add_library(dawn::webgpu_dawn ALIAS dawn_webgpu_uwp_depot)
++  endif ()
++  set(DAWN_ENABLE_D3D12 ON CACHE INTERNAL "")
++  set(DAWN_ENABLE_D3D11 ON CACHE INTERNAL "")
++  set(DAWN_ENABLE_VULKAN OFF CACHE INTERNAL "")
++  set(DAWN_ENABLE_METAL OFF CACHE INTERNAL "")
++  set(DAWN_ENABLE_DESKTOP_GL OFF CACHE INTERNAL "")
++  set(DAWN_ENABLE_OPENGLES OFF CACHE INTERNAL "")
++  set(DAWN_ENABLE_NULL ON CACHE INTERNAL "")
++  set(AURORA_DAWN_IS_SHARED TRUE PARENT_SCOPE)
++
+ else ()
+   message(FATAL_ERROR "Invalid AURORA_DAWN_PROVIDER: ${AURORA_DAWN_PROVIDER} "
+-    "(must be auto, vendor, system, or package)")
++    "(must be auto, vendor, system, package, or uwp_dep)")
+ endif ()
+ 
+ # Ensure dawn::dawncpp_headers target exists (needed by tests).
+diff --git a/cmake/AuroraNodProvider.cmake b/cmake/AuroraNodProvider.cmake
+index 3bcbbdf..3979453 100644
+--- a/cmake/AuroraNodProvider.cmake
++++ b/cmake/AuroraNodProvider.cmake
+@@ -13,25 +13,32 @@ include("${CMAKE_CURRENT_LIST_DIR}/AuroraTargetPlatform.cmake")
+ # ── Auto: resolve provider based on platform availability ──
+ set(_aurora_nod_provider "${AURORA_NOD_PROVIDER}")
+ if (_aurora_nod_provider STREQUAL "auto")
+-  # Prebuilt nod packages available for: windows-x86_64, linux-x86_64, macos-arm64
+-  aurora_get_target_arch(_target_arch)
+-  set(_has_package FALSE)
+-  if (CMAKE_SYSTEM_NAME STREQUAL "Windows" AND _target_arch STREQUAL "AMD64")
+-    set(_has_package TRUE)
+-  elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND _target_arch STREQUAL "x86_64")
+-    set(_has_package TRUE)
+-  elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND _target_arch STREQUAL "arm64")
+-    set(_has_package TRUE)
+-  endif ()
+-
+-  if (_has_package)
+-    set(_aurora_nod_provider "package")
++  if (DEFINED AURORA_UWP_DEP_ROOT AND EXISTS "${AURORA_UWP_DEP_ROOT}/x64/lib/nod.lib")
++    set(_aurora_nod_provider "uwp_dep")
+   else ()
+-    find_package(nod QUIET CONFIG)
+-    if (nod_FOUND)
+-      set(_aurora_nod_provider "system")
++    aurora_get_target_arch(_target_arch)
++    set(_has_package FALSE)
++    if (CMAKE_SYSTEM_NAME STREQUAL "Windows" AND _target_arch STREQUAL "AMD64")
++      if (AURORA_WINDOWS_STORE)
++        message(FATAL_ERROR
++          "aurora: nod on UWP requires uwp-dep.")
++      endif ()
++      set(_has_package TRUE)
++    elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND _target_arch STREQUAL "x86_64")
++      set(_has_package TRUE)
++    elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND _target_arch STREQUAL "arm64")
++      set(_has_package TRUE)
++    endif ()
++
++    if (_has_package)
++      set(_aurora_nod_provider "package")
+     else ()
+-      set(_aurora_nod_provider "vendor")
++      find_package(nod QUIET CONFIG)
++      if (nod_FOUND)
++        set(_aurora_nod_provider "system")
++      else ()
++        set(_aurora_nod_provider "vendor")
++      endif ()
+     endif ()
+   endif ()
+   set(AURORA_NOD_PROVIDER "${_aurora_nod_provider}" CACHE STRING "" FORCE)
+@@ -160,7 +167,24 @@ elseif (_aurora_nod_provider STREQUAL "package")
+     message(FATAL_ERROR "Prebuilt nod package did not provide nod::nod target")
+   endif ()
+ 
++elseif (_aurora_nod_provider STREQUAL "uwp_dep")
++  if (NOT DEFINED AURORA_UWP_DEP_ROOT OR NOT EXISTS "${AURORA_UWP_DEP_ROOT}/x64/lib/nod.lib")
++    message(FATAL_ERROR "aurora: AURORA_NOD_PROVIDER=uwp_dep requires uwp-dep x64/lib/nod.lib.")
++  endif ()
++  message(STATUS "aurora: Using nod from uwp-dep (${AURORA_UWP_DEP_ROOT})")
++  set(_uwp_x64 "${AURORA_UWP_DEP_ROOT}/x64")
++  if (NOT TARGET nod_uwp_depot)
++    add_library(nod_uwp_depot SHARED IMPORTED GLOBAL)
++    set_target_properties(nod_uwp_depot PROPERTIES
++      IMPORTED_LOCATION "${_uwp_x64}/bin/nod.dll"
++      IMPORTED_IMPLIB "${_uwp_x64}/lib/nod.lib"
++    )
++  endif ()
++  if (NOT TARGET nod::nod)
++    add_library(nod::nod ALIAS nod_uwp_depot)
++  endif ()
++
+ else ()
+   message(FATAL_ERROR "Invalid AURORA_NOD_PROVIDER: ${AURORA_NOD_PROVIDER} "
+-    "(must be auto, vendor, system, or package)")
++    "(must be auto, vendor, system, package, or uwp_dep)")
+ endif ()
+diff --git a/cmake/AuroraSDL3Provider.cmake b/cmake/AuroraSDL3Provider.cmake
+index 0f148b0..187b201 100644
+--- a/cmake/AuroraSDL3Provider.cmake
++++ b/cmake/AuroraSDL3Provider.cmake
+@@ -37,17 +37,25 @@ endfunction()
+ # ── Auto: resolve provider based on platform availability ──
+ set(_aurora_sdl3_provider "${AURORA_SDL3_PROVIDER}")
+ if (_aurora_sdl3_provider STREQUAL "auto")
+-  # Prebuilt SDL3 packages are available for Windows (MSVC and MinGW)
+-  if (WIN32)
+-    set(_aurora_sdl3_provider "package")
++  if (DEFINED AURORA_UWP_DEP_ROOT AND EXISTS "${AURORA_UWP_DEP_ROOT}/x64/lib/SDL3.lib")
++    set(_aurora_sdl3_provider "uwp_dep")
+   else ()
+-    set(CMAKE_FIND_PACKAGE_TARGETS_GLOBAL ON)
+-    find_package(SDL3 QUIET)
+-    set(CMAKE_FIND_PACKAGE_TARGETS_GLOBAL OFF)
+-    if (SDL3_FOUND)
+-      set(_aurora_sdl3_provider "system")
++    # Prebuilt SDL3 packages are available for Windows (MSVC and MinGW)
++    if (WIN32)
++      if (AURORA_WINDOWS_STORE)
++        message(FATAL_ERROR
++          "aurora: SDL3 on UWP requires uwp-dep.")
++      endif ()
++      set(_aurora_sdl3_provider "package")
+     else ()
+-      set(_aurora_sdl3_provider "vendor")
++      set(CMAKE_FIND_PACKAGE_TARGETS_GLOBAL ON)
++      find_package(SDL3 QUIET)
++      set(CMAKE_FIND_PACKAGE_TARGETS_GLOBAL OFF)
++      if (SDL3_FOUND)
++        set(_aurora_sdl3_provider "system")
++      else ()
++        set(_aurora_sdl3_provider "vendor")
++      endif ()
+     endif ()
+   endif ()
+   set(AURORA_SDL3_PROVIDER "${_aurora_sdl3_provider}" CACHE STRING "" FORCE)
+@@ -156,9 +164,28 @@ elseif (_aurora_sdl3_provider STREQUAL "vendor")
+   endif ()
+   _aurora_sdl3_select_target()
+ 
++elseif (_aurora_sdl3_provider STREQUAL "uwp_dep")
++  if (NOT DEFINED AURORA_UWP_DEP_ROOT OR NOT EXISTS "${AURORA_UWP_DEP_ROOT}/x64/lib/SDL3.lib")
++    message(FATAL_ERROR "aurora: AURORA_SDL3_PROVIDER=uwp_dep requires uwp-dep x64/lib/SDL3.lib.")
++  endif ()
++  message(STATUS "aurora: Using SDL3 from uwp-dep (${AURORA_UWP_DEP_ROOT})")
++  set(_uwp_x64 "${AURORA_UWP_DEP_ROOT}/x64")
++  if (NOT TARGET SDL3_uwp_depot)
++    add_library(SDL3_uwp_depot SHARED IMPORTED GLOBAL)
++    set_target_properties(SDL3_uwp_depot PROPERTIES
++      IMPORTED_LOCATION "${_uwp_x64}/bin/SDL3.dll"
++      IMPORTED_IMPLIB "${_uwp_x64}/lib/SDL3.lib"
++      INTERFACE_INCLUDE_DIRECTORIES "${_uwp_x64}/include"
++    )
++  endif ()
++  if (NOT TARGET SDL3::SDL3)
++    add_library(SDL3::SDL3 ALIAS SDL3_uwp_depot)
++  endif ()
++  set(AURORA_SDL3_TARGET SDL3::SDL3 CACHE INTERNAL "")
++
+ else ()
+   message(FATAL_ERROR "Invalid AURORA_SDL3_PROVIDER: ${AURORA_SDL3_PROVIDER} "
+-    "(must be auto, vendor, system, or package)")
++    "(must be auto, vendor, system, package, or uwp_dep)")
+ endif ()
+ 
+ if (ANDROID)
+diff --git a/cmake/AuroraUwpDep.cmake b/cmake/AuroraUwpDep.cmake
+new file mode 100644
+index 0000000..8799524
+--- /dev/null
++++ b/cmake/AuroraUwpDep.cmake
+@@ -0,0 +1,85 @@
++include_guard(GLOBAL)
++
++if (NOT AURORA_WINDOWS_STORE)
++  return()
++endif ()
++
++if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
++  message(FATAL_ERROR "aurora: uwp-dep ships x64 binaries only.")
++endif ()
++
++option(AURORA_FETCH_UWP_DEP "Fetch uwp-dep (UWP SDL / Dawn / nod / libuwp)" ON)
++
++if (NOT AURORA_FETCH_UWP_DEP)
++  return()
++endif ()
++
++set(AURORA_UWP_DEP_SOURCE_DIR "" CACHE PATH
++  "Path to a local uwp-dep checkout")
++
++if (AURORA_UWP_DEP_SOURCE_DIR)
++  get_filename_component(_aurora_uwp_dep_root "${AURORA_UWP_DEP_SOURCE_DIR}" REALPATH)
++  if (NOT EXISTS "${_aurora_uwp_dep_root}/CMakeLists.txt")
++    message(FATAL_ERROR "AURORA_UWP_DEP_SOURCE_DIR must be the uwp-dep repository root.")
++  endif ()
++  add_subdirectory("${_aurora_uwp_dep_root}" "${CMAKE_BINARY_DIR}/_aurora_uwp_dep" EXCLUDE_FROM_ALL)
++  set(AURORA_UWP_DEP_ROOT "${_aurora_uwp_dep_root}" CACHE INTERNAL "SternXD/uwp-dep root")
++else ()
++  include(FetchContent)
++  set(AURORA_UWP_DEP_REPOSITORY "https://github.com/SternXD/uwp-dep.git"
++    CACHE STRING "Git repository for SternXD/uwp-dep")
++  set(AURORA_UWP_DEP_TAG "810cdcb672383045a8b03d1d55bb535352d7d46f" CACHE STRING "Git tag or branch for SternXD/uwp-dep")
++  FetchContent_Declare(aurora_uwp_dep
++    GIT_REPOSITORY "${AURORA_UWP_DEP_REPOSITORY}"
++    GIT_TAG "${AURORA_UWP_DEP_TAG}"
++    GIT_SHALLOW TRUE
++  )
++  message(STATUS "aurora: Fetching uwp-dep (${AURORA_UWP_DEP_TAG})")
++  FetchContent_MakeAvailable(aurora_uwp_dep)
++  set(AURORA_UWP_DEP_ROOT "${aurora_uwp_dep_SOURCE_DIR}" CACHE INTERNAL "SternXD/uwp-dep root")
++endif ()
++
++set(_aurora_uwp_x64 "${AURORA_UWP_DEP_ROOT}/x64")
++set(_aurora_uwp_dep_skip "")
++if (EXISTS "${_aurora_uwp_x64}/lib/SDL3.lib"
++    AND (AURORA_SDL3_PROVIDER STREQUAL "auto"
++      OR AURORA_SDL3_PROVIDER STREQUAL "vendor"
++      OR AURORA_SDL3_PROVIDER STREQUAL "package"))
++  set(AURORA_SDL3_PROVIDER "uwp_dep" CACHE STRING "" FORCE)
++  set(AURORA_SDL3_LINKAGE "shared" CACHE STRING "" FORCE)
++elseif (EXISTS "${_aurora_uwp_x64}/lib/SDL3.lib" AND NOT AURORA_SDL3_PROVIDER STREQUAL "uwp_dep")
++  list(APPEND _aurora_uwp_dep_skip "SDL3(${AURORA_SDL3_PROVIDER})")
++endif ()
++if (AURORA_ENABLE_GX AND EXISTS "${_aurora_uwp_x64}/lib/webgpu_dawn.lib"
++    AND (AURORA_DAWN_PROVIDER STREQUAL "auto"
++      OR AURORA_DAWN_PROVIDER STREQUAL "vendor"
++      OR AURORA_DAWN_PROVIDER STREQUAL "package"))
++  set(AURORA_DAWN_PROVIDER "uwp_dep" CACHE STRING "" FORCE)
++  set(AURORA_DAWN_LINKAGE "shared" CACHE STRING "" FORCE)
++elseif (AURORA_ENABLE_GX AND EXISTS "${_aurora_uwp_x64}/lib/webgpu_dawn.lib" AND NOT AURORA_DAWN_PROVIDER STREQUAL "uwp_dep")
++  list(APPEND _aurora_uwp_dep_skip "Dawn(${AURORA_DAWN_PROVIDER})")
++endif ()
++if (AURORA_ENABLE_DVD AND EXISTS "${_aurora_uwp_x64}/lib/nod.lib"
++    AND (AURORA_NOD_PROVIDER STREQUAL "auto"
++      OR AURORA_NOD_PROVIDER STREQUAL "vendor"
++      OR AURORA_NOD_PROVIDER STREQUAL "package"))
++  set(AURORA_NOD_PROVIDER "uwp_dep" CACHE STRING "" FORCE)
++  set(AURORA_NOD_LINKAGE "shared" CACHE STRING "" FORCE)
++elseif (AURORA_ENABLE_DVD AND EXISTS "${_aurora_uwp_x64}/lib/nod.lib" AND NOT AURORA_NOD_PROVIDER STREQUAL "uwp_dep")
++  list(APPEND _aurora_uwp_dep_skip "nod(${AURORA_NOD_PROVIDER})")
++endif ()
++if (_aurora_uwp_dep_skip)
++  list(JOIN _aurora_uwp_dep_skip ", " _aurora_uwp_dep_skip_join)
++  message(STATUS "aurora: uwp-dep prebuilts present; non-uwp_dep providers unchanged: ${_aurora_uwp_dep_skip_join} (set to auto to select uwp_dep)")
++  unset(_aurora_uwp_dep_skip_join)
++endif ()
++unset(_aurora_uwp_dep_skip)
++unset(_aurora_uwp_x64)
++
++if (NOT TARGET LIBUWP)
++  message(FATAL_ERROR "aurora: uwp-dep did not define imported target LIBUWP.")
++endif ()
++
++if (NOT TARGET aurora::uwp_dep)
++  add_library(aurora::uwp_dep ALIAS LIBUWP)
++endif ()
+diff --git a/cmake/aurora_core.cmake b/cmake/aurora_core.cmake
+index dfeed19..2570cd3 100644
+--- a/cmake/aurora_core.cmake
++++ b/cmake/aurora_core.cmake
+@@ -18,6 +18,9 @@ add_library(aurora::core ALIAS aurora_core)
+ set_target_properties(aurora_core PROPERTIES FOLDER "aurora")
+ 
+ target_compile_definitions(aurora_core PUBLIC AURORA TARGET_PC)
++if (AURORA_WINDOWS_STORE)
++  target_compile_definitions(aurora_core PUBLIC AURORA_WINDOWS_STORE=1)
++endif ()
+ target_include_directories(aurora_core PUBLIC include)
+ target_link_libraries(aurora_core PUBLIC fmt::fmt ${AURORA_SDL3_TARGET} xxHash::xxhash)
+ target_link_libraries(aurora_core PRIVATE absl::btree absl::flat_hash_map sqlite3 Tracy::TracyClient)
+@@ -32,9 +35,12 @@ if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+     )
+ endif ()
+ 
+-if (CMAKE_SYSTEM_NAME STREQUAL Windows)
++if (CMAKE_SYSTEM_NAME STREQUAL "Windows" OR CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+     # stuff for fetching system info.
+-    target_link_libraries(aurora_core PRIVATE wbemuuid.lib comsuppw.lib ntdll.lib DXGI.lib)
++    target_link_libraries(aurora_core PRIVATE ntdll.lib DXGI.lib)
++    if (NOT AURORA_WINDOWS_STORE)
++        target_link_libraries(aurora_core PRIVATE wbemuuid.lib comsuppw.lib)
++    endif ()
+ elseif (APPLE)
+     target_sources(aurora_core PRIVATE lib/system_info_mac.mm)
+ endif ()
+@@ -109,4 +115,7 @@ if (AURORA_ENABLE_GX)
+     if (DAWN_ENABLE_NULL)
+         target_compile_definitions(aurora_core PRIVATE DAWN_ENABLE_BACKEND_NULL)
+     endif ()
++    if (TARGET aurora::uwp_dep)
++        target_link_libraries(aurora_core PUBLIC aurora::uwp_dep)
++    endif ()
+ endif ()
+diff --git a/examples/simple.c b/examples/simple.c
+index cb8a6c4..145c3e8 100644
+--- a/examples/simple.c
++++ b/examples/simple.c
+@@ -29,6 +29,9 @@ static void log_callback(AuroraLogLevel level, const char* module, const char* m
+     levelStr = "FATAL";
+     out = stderr;
+     break;
++  default:
++    levelStr = "UNKNOWN";
++    break;
+   }
+   fprintf(out, "[%s: %s;%s]\n", levelStr, module, message);
+   if (level == LOG_FATAL) {
+diff --git a/extern/CMakeLists.txt b/extern/CMakeLists.txt
+index 2ab98a9..7c15c3a 100644
+--- a/extern/CMakeLists.txt
++++ b/extern/CMakeLists.txt
+@@ -13,6 +13,10 @@ function(aurora_find_package_global)
+   find_package(${ARGV} GLOBAL)
+ endfunction()
+ 
++if (AURORA_WINDOWS_STORE)
++  include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/AuroraUwpDep.cmake)
++endif ()
++
+ if (AURORA_ENABLE_GX)
+   include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/AuroraDawnProvider.cmake)
+   set(AURORA_DAWN_IS_SHARED "${AURORA_DAWN_IS_SHARED}" PARENT_SCOPE)
+@@ -111,6 +115,28 @@ if (NOT TARGET fmt::fmt)
+ endif ()
+ 
+ if (AURORA_ENABLE_GX)
++  set(_u "")
++  if (AURORA_WINDOWS_STORE AND DEFINED AURORA_UWP_DEP_ROOT)
++    set(_u "${AURORA_UWP_DEP_ROOT}/x64")
++  endif ()
++  if (_u AND EXISTS "${_u}/lib/z.lib" AND EXISTS "${_u}/lib/libpng16.lib" AND NOT TARGET zlib_uwp_depot)
++    message(STATUS "aurora: zlib and libpng from uwp-dep (${AURORA_UWP_DEP_ROOT})")
++    add_library(zlib_uwp_depot SHARED IMPORTED GLOBAL)
++    set_target_properties(zlib_uwp_depot PROPERTIES
++      IMPORTED_LOCATION "${_u}/bin/z.dll"
++      IMPORTED_IMPLIB "${_u}/lib/z.lib"
++      INTERFACE_INCLUDE_DIRECTORIES "${_u}/include")
++    add_library(ZLIB::ZLIB ALIAS zlib_uwp_depot)
++    add_library(libpng16_uwp_depot SHARED IMPORTED GLOBAL)
++    set_target_properties(libpng16_uwp_depot PROPERTIES
++      IMPORTED_LOCATION "${_u}/bin/libpng16.dll"
++      IMPORTED_IMPLIB "${_u}/lib/libpng16.lib"
++      INTERFACE_INCLUDE_DIRECTORIES "${_u}/include;${_u}/include/libpng16"
++      INTERFACE_LINK_LIBRARIES ZLIB::ZLIB)
++    add_library(PNG::PNG ALIAS libpng16_uwp_depot)
++  endif ()
++  unset(_u)
++
+   if (NOT TARGET ZLIB::ZLIB)
+     aurora_find_package_global(ZLIB QUIET)
+   endif ()
+@@ -193,6 +219,14 @@ if (AURORA_ENABLE_GX)
+   else ()
+     message(STATUS "aurora: Using existing libpng")
+   endif ()
++  if (AURORA_WINDOWS_STORE AND MSVC)
++    foreach (_aurora_png IN ITEMS png_shared png_static)
++      if (TARGET ${_aurora_png})
++        target_compile_options(${_aurora_png} PRIVATE /wd4146)
++      endif ()
++    endforeach ()
++    unset(_aurora_png)
++  endif ()
+ 
+   aurora_find_package_global(Freetype QUIET)
+   if (NOT TARGET Freetype::Freetype)
+@@ -296,6 +330,9 @@ if (AURORA_ENABLE_GX)
+     add_library(sqlite3 STATIC ${sqlite3_SOURCE_DIR}/sqlite3.c)
+     target_include_directories(sqlite3 PUBLIC ${sqlite3_SOURCE_DIR})
+   endif ()
++  if (TARGET sqlite3 AND AURORA_WINDOWS_STORE)
++    target_compile_definitions(sqlite3 PRIVATE SQLITE_OS_WINRT=1)
++  endif ()
+ 
+   if (AURORA_CACHE_USE_ZSTD)
+     aurora_find_package_global(zstd CONFIG QUIET)
+@@ -351,23 +388,57 @@ if (NOT TARGET Tracy::TracyClient)
+   aurora_find_package_global(Tracy CONFIG)
+ endif ()
+ if (NOT TARGET Tracy::TracyClient)
+-  message(STATUS "aurora: Fetching Tracy")
++  if (AURORA_WINDOWS_STORE)
++    set(_aurora_tracy_tgz "${CMAKE_BINARY_DIR}/aurora_deps/tracy-a64b9a20294d59421a2f57aeca3c6383d8c48169.tar.gz")
++    set(_aurora_tracy_extract "${CMAKE_BINARY_DIR}/aurora_deps/tracy-src")
++    set(_aurora_tracy_marker "${_aurora_tracy_extract}/.aurora_tracy_extracted")
++    if (NOT EXISTS "${_aurora_tracy_marker}")
++      file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/aurora_deps")
++      file(DOWNLOAD
++        "https://github.com/wolfpld/tracy/archive/a64b9a20294d59421a2f57aeca3c6383d8c48169.tar.gz"
++        "${_aurora_tracy_tgz}"
++        EXPECTED_HASH SHA256=24d342b5127d7f659dc3cf94f24347b348cc736f25b17a691fd7f69541937658
++      )
++      file(MAKE_DIRECTORY "${_aurora_tracy_extract}")
++      file(ARCHIVE_EXTRACT INPUT "${_aurora_tracy_tgz}" DESTINATION "${_aurora_tracy_extract}")
++      file(WRITE "${_aurora_tracy_marker}" "")
++    endif ()
++    file(GLOB _aurora_tracy_roots LIST_DIRECTORIES TRUE "${_aurora_tracy_extract}/tracy-*")
++    if (NOT _aurora_tracy_roots)
++      message(FATAL_ERROR "aurora: Tracy archive layout unexpected under ${_aurora_tracy_extract}")
++    endif ()
++    list(GET _aurora_tracy_roots 0 _aurora_tracy_root)
++    if (NOT EXISTS "${_aurora_tracy_root}/public/tracy/Tracy.hpp")
++      message(FATAL_ERROR "aurora: Tracy public headers missing at ${_aurora_tracy_root}/public/tracy")
++    endif ()
++    message(STATUS "aurora: Tracy headers for UWP (${_aurora_tracy_root}/public)")
++    add_library(TracyClient INTERFACE)
++    target_include_directories(TracyClient INTERFACE "${_aurora_tracy_root}/public")
++    add_library(Tracy::TracyClient ALIAS TracyClient)
++    unset(_aurora_tracy_tgz)
++    unset(_aurora_tracy_extract)
++    unset(_aurora_tracy_marker)
++    unset(_aurora_tracy_roots)
++    unset(_aurora_tracy_root)
++  else ()
++    message(STATUS "aurora: Fetching Tracy")
+ 
+-  # Default to off, users can enable the cache variable if they want to use it.
+-  set(TRACY_ENABLE OFF CACHE BOOL "Enable Tracy profiling")
+-  set(TRACY_ON_DEMAND ON CACHE BOOL "On-demand profiling")
+-  set(TRACY_STATIC ON CACHE BOOL "Whether to build Tracy as a static library" FORCE)
++    # Default to off, users can enable the cache variable if they want to use it.
++    set(TRACY_ENABLE OFF CACHE BOOL "Enable Tracy profiling")
++    set(TRACY_ON_DEMAND ON CACHE BOOL "On-demand profiling")
++    set(TRACY_STATIC ON CACHE BOOL "Whether to build Tracy as a static library" FORCE)
+ 
+-  FetchContent_Declare(
+-          tracy
+-          URL https://github.com/wolfpld/tracy/archive/refs/tags/v0.14.1.zip
+-          URL_HASH SHA256=908f3a2917fa86a247abfcf85dcf04bad1db6986a4d40f94b70512f3e9e98d5b
+-          DOWNLOAD_EXTRACT_TIMESTAMP FALSE
+-          EXCLUDE_FROM_ALL
+-  )
+-  FetchContent_MakeAvailable(tracy)
++    FetchContent_Declare(
++      tracy
++      URL https://github.com/wolfpld/tracy/archive/refs/tags/v0.14.1.zip
++      URL_HASH SHA256=908f3a2917fa86a247abfcf85dcf04bad1db6986a4d40f94b70512f3e9e98d5b
++      DOWNLOAD_EXTRACT_TIMESTAMP FALSE
++      EXCLUDE_FROM_ALL
++    )
++    FetchContent_MakeAvailable(tracy)
+ 
+-  if (NOT TARGET TracyClient)
+-    message(FATAL_ERROR "Failed to make TracyClient available")
++    if (NOT TARGET TracyClient)
++      message(FATAL_ERROR "Failed to make TracyClient available")
++    endif ()
+   endif ()
+ endif ()
+diff --git a/lib/aurora.cpp b/lib/aurora.cpp
+index 9430842..8c45f50 100644
+--- a/lib/aurora.cpp
++++ b/lib/aurora.cpp
+@@ -26,6 +26,7 @@
+ #include "window.hpp"
+ 
+ #include <SDL3/SDL_filesystem.h>
++#include <SDL3/SDL_stdinc.h>
+ #include <magic_enum.hpp>
+ 
+ #include "system_info.hpp"
+@@ -103,22 +104,38 @@ AuroraInfo initialize(int argc, char* argv[], const AuroraConfig& config) noexce
+   if (g_config.appName == nullptr) {
+     g_config.appName = "Aurora";
+   } else {
++    #ifdef AURORA_WINDOWS_STORE
++    g_config.appName = SDL_strdup(g_config.appName);
++    #else
+     g_config.appName = strdup(g_config.appName);
++    #endif
+   }
+   if (g_config.userPath == nullptr) {
+     g_config.userPath = SDL_GetPrefPath(nullptr, g_config.appName);
+   } else {
++#ifdef AURORA_WINDOWS_STORE
++    g_config.userPath = SDL_strdup(g_config.userPath);
++#else
+     g_config.userPath = strdup(g_config.userPath);
++#endif
+   }
+   if (g_config.cachePath == nullptr) {
+     g_config.cachePath = SDL_GetPrefPath(nullptr, g_config.appName);
+   } else {
++#ifdef AURORA_WINDOWS_STORE
++    g_config.cachePath = SDL_strdup(g_config.cachePath);
++#else
+     g_config.cachePath = strdup(g_config.cachePath);
++#endif
+   }
+   if (g_config.resourcesPath == nullptr) {
+     g_config.resourcesPath = SDL_GetBasePath();
+   } else {
++#ifdef AURORA_WINDOWS_STORE
++    g_config.resourcesPath = SDL_strdup(g_config.resourcesPath);
++#else
+     g_config.resourcesPath = strdup(g_config.resourcesPath);
++#endif
+   }
+   if (g_config.msaa == 0) {
+     g_config.msaa = 1;
+@@ -134,7 +151,11 @@ AuroraInfo initialize(int argc, char* argv[], const AuroraConfig& config) noexce
+ 
+ #ifdef AURORA_ENABLE_GX
+   /* Attempt to create a window using the calling application's desired backend */
++#ifndef AURORA_WINDOWS_STORE
+   AuroraBackend selectedBackend = config.desiredBackend;
++#else
++  AuroraBackend selectedBackend = BACKEND_D3D12;
++#endif
+   bool windowCreated = false;
+   if (selectedBackend != BACKEND_AUTO && window::create_window(selectedBackend)) {
+     if (webgpu::initialize(selectedBackend, config.allowCpuAdapter)) {
+diff --git a/lib/card/CardGciFolder.cpp b/lib/card/CardGciFolder.cpp
+index 00ff828..fec222f 100644
+--- a/lib/card/CardGciFolder.cpp
++++ b/lib/card/CardGciFolder.cpp
+@@ -281,7 +281,11 @@ ECardResult CardGciFolder::renameFile(const char* oldName, const char* newName)
+     return ECardResult::IOERROR;
+   }
+   File header = file.file;
++#ifdef AURORA_WINDOWS_STORE
++  strncpy_s(header.m_filename, newName, CARD_FILENAME_MAX);
++#else
+   std::strncpy(header.m_filename, newName, CARD_FILENAME_MAX);
++#endif
+   File diskHeader = header;
+   diskHeader.swapEndian();
+   std::memcpy(contents->data(), &diskHeader, sizeof(File));
+@@ -366,7 +370,11 @@ ECardResult CardGciFolder::getStatus(uint32_t fileNo, CardStat& statOut) const {
+     return ECardResult::NOFILE;
+   const auto file = &gciFile->file;
+ 
++#ifdef AURORA_WINDOWS_STORE
++  strncpy_s(statOut.x0_fileName, file->m_filename, 32);
++#else
+   std::strncpy(statOut.x0_fileName, file->m_filename, 32);
++#endif
+   statOut.x20_length = file->m_blockCount * BlockSize;
+   statOut.x24_time = file->m_modifiedTime;
+   memmove(statOut.x28_gameName.data(), file->m_game, statOut.x28_gameName.size());
+diff --git a/lib/card/CardRawFile.cpp b/lib/card/CardRawFile.cpp
+index 599fd89..ea418fd 100644
+--- a/lib/card/CardRawFile.cpp
++++ b/lib/card/CardRawFile.cpp
+@@ -380,7 +380,11 @@ ECardResult CardRawFile::renameFile(const char* oldName, const char* newName) {
+   if (dir.getFile(m_game, m_maker, newName)) {
+     return ECardResult::EXIST;
+   }
++#ifdef AURORA_WINDOWS_STORE
++  strncpy_s(f->m_filename, newName, CARD_FILENAME_MAX);
++#else
+   std::strncpy(f->m_filename, newName, CARD_FILENAME_MAX);
++#endif
+   _updateDirAndBat(dir, m_bats[m_currentBat]);
+   return ECardResult::READY;
+ }
+@@ -602,7 +606,11 @@ ECardResult CardRawFile::getStatus(uint32_t fileNo, CardStat& statOut) const {
+   if (!file || file->m_game[0] == 0xFF)
+     return ECardResult::NOFILE;
+ 
++#ifdef AURORA_WINDOWS_STORE
++  strncpy_s(statOut.x0_fileName, file->m_filename, 32);
++#else
+   std::strncpy(statOut.x0_fileName, file->m_filename, 32);
++#endif
+   statOut.x20_length = file->m_blockCount * BlockSize;
+   statOut.x24_time = file->m_modifiedTime;
+   memmove(statOut.x28_gameName.data(), file->m_game, statOut.x28_gameName.size());
+diff --git a/lib/card/DolphinCardPath.cpp b/lib/card/DolphinCardPath.cpp
+index ccec832..e17620d 100644
+--- a/lib/card/DolphinCardPath.cpp
++++ b/lib/card/DolphinCardPath.cpp
+@@ -2,7 +2,7 @@
+ 
+ #include "DolphinCardPath.hpp"
+ 
+-#if WIN32
++#if WIN32 && !defined(AURORA_WINDOWS_STORE)
+ #ifndef WIN32_LEAN_AND_MEAN
+ #define WIN32_LEAN_AND_MEAN
+ #endif
+@@ -18,7 +18,7 @@
+ 
+ #include "../internal.hpp"
+ 
+-#if WIN32
++#if WIN32 && !defined(AURORA_WINDOWS_STORE)
+ namespace {
+   std::string ConvertWideToANSI(const std::wstring& wstr) {
+     int count = WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), wstr.length(), NULL, 0, NULL, NULL);
+@@ -34,12 +34,21 @@ aurora::Module Log("aurora::card");
+ 
+ #if WIN32
+ 
+-#if WINDOWS_STORE
+-using namespace Windows::Storage;
+-#endif
+-
+ std::string ResolveDolphinCardPath(ECardSlot slot, const char* regionCode, bool isGciFolder) {
+-#if !WINDOWS_STORE
++#ifdef AURORA_WINDOWS_STORE
++  char* pref = SDL_GetPrefPath(nullptr, "dolphin-emu");
++  if (pref == nullptr) {
++    Log.error("Unable to get pref path for dolphin-emu");
++    return {};
++  }
++  std::string path{pref};
++  SDL_free(pref);
++  if (isGciFolder) {
++    path += fmt::format("GC/{}/Card {}", regionCode, slot == ECardSlot::SlotA ? 'A' : 'B');
++  } else {
++    path += fmt::format("GC/MemoryCard{}.{}.raw", slot == ECardSlot::SlotA ? 'A' : 'B', regionCode);
++  }
++#else
+   /* Detect where the User directory is. There are two different cases
+    * 1. HKCU\Software\Dolphin Emulator\UserConfigPath exists
+    *    -> Use this as the user directory path
+@@ -73,10 +82,6 @@ std::string ResolveDolphinCardPath(ECardSlot slot, const char* regionCode, bool
+     Log.error("Unable to find Dolphin Emulator user directory!");
+     return {};
+   }
+-#else
+-  StorageFolder ^ localFolder = ApplicationData::Current->LocalFolder;
+-  std::string path(localFolder->Path->Data());
+-#endif
+ 
+   std::string path;
+   if (isGciFolder) {
+@@ -84,6 +89,7 @@ std::string ResolveDolphinCardPath(ECardSlot slot, const char* regionCode, bool
+   }else {
+     path = fmt::format("{}/GC/MemoryCard{}.{}.raw", ConvertWideToANSI(w_path), slot == ECardSlot::SlotA ? 'A' : 'B', regionCode);
+   }
++#endif
+ 
+   if (!std::filesystem::exists(path)) {
+     Log.error("Unable to find Dolphin Card file! Search Path: {}", path);
+diff --git a/lib/card/File.cpp b/lib/card/File.cpp
+index b684e64..d891528 100644
+--- a/lib/card/File.cpp
++++ b/lib/card/File.cpp
+@@ -13,7 +13,11 @@ File::File(const RawData& rawData) : raw{rawData} {}
+ File::File(const char* filename) {
+   raw.fill(0);
+   std::memset(m_filename, 0, std::size(m_filename));
++#ifdef AURORA_WINDOWS_STORE
++  strncpy_s(m_filename, filename, std::size(m_filename));
++#else
+   std::strncpy(m_filename, filename, std::size(m_filename));
++#endif
+ }
+ void File::swapEndian() {
+   m_modifiedTime = bswap(m_modifiedTime);
+diff --git a/lib/card/Util.cpp b/lib/card/Util.cpp
+index 0447183..7c70398 100644
+--- a/lib/card/Util.cpp
++++ b/lib/card/Util.cpp
+@@ -8,7 +8,18 @@ uint64_t getGCTime() {
+ 
+   time(&sysTime);
+ 
+-  // Account for DST where needed
++#if defined(_MSC_VER)
++  tm localTm{};
++  tm gmTm{};
++  if (localtime_s(&localTm, &sysTime) != 0 || gmtime_s(&gmTm, &sysTime) != 0) {
++    return 0;
++  }
++  if (localTm.tm_isdst == 1)
++    tzDST = 3600;
++  else
++    tzDST = 0;
++  time_t tzDiff = sysTime - mktime(&gmTm);
++#else
+   tm* gmTime = localtime(&sysTime);
+   if (gmTime->tm_isdst == 1)
+     tzDST = 3600;
+@@ -18,6 +29,7 @@ uint64_t getGCTime() {
+   // Lazy way to get local time in sec
+   gmTime = gmtime(&sysTime);
+   time_t tzDiff = sysTime - mktime(gmTime);
++#endif
+ 
+   return static_cast<uint64_t>(sysTime + tzDiff + tzDST) - 0x386D4380;
+ }
+diff --git a/lib/dolphin/pad/pad.cpp b/lib/dolphin/pad/pad.cpp
+index 4e135d2..094fa92 100644
+--- a/lib/dolphin/pad/pad.cpp
++++ b/lib/dolphin/pad/pad.cpp
+@@ -885,13 +885,13 @@ u32 PADRead(PADStatus* status) {
+         }
+ 
+         if (std::abs(yr) > controller->m_deadZones.substickDeadZone) {
+-          yr = static_cast<Sint16>(-(yr + 1u) / 256u);
++          yr = static_cast<Sint16>(-(static_cast<int>(yr) + 1) / 256);
+         } else {
+           yr = 0;
+         }
+       } else {
+         xr /= 256;
+-        yr = static_cast<Sint16>(-(yr + 1u) / 256u);
++        yr = static_cast<Sint16>(-(static_cast<int>(yr) + 1) / 256);
+       }
+ 
+       status[i].substickX = static_cast<int8_t>(xr);
+diff --git a/lib/input.cpp b/lib/input.cpp
+index 9101f24..e1b55e4 100644
+--- a/lib/input.cpp
++++ b/lib/input.cpp
+@@ -452,8 +452,13 @@ void persist_controller_for_player(uint32_t player, const GameController* contro
+ void initialize() noexcept {
+   /* Make sure we initialize everything input related now, this will automatically add all of the connected controllers
+    * as expected */
++#ifndef AURORA_WINDOWS_STORE
+   AURORA_ASSERT(SDL_Init(SDL_INIT_HAPTIC | SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD | SDL_INIT_SENSOR),
+                 "Failed to initialize SDL subsystems: {}", SDL_GetError());
++#else
++  AURORA_ASSERT(SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD),
++                "Failed to initialize SDL subsystems: {}", SDL_GetError());
++#endif
+ }
+ 
+ struct MouseScrollStatus {
+diff --git a/lib/main.cpp b/lib/main.cpp
+index 8a7fbee..570dc68 100644
+--- a/lib/main.cpp
++++ b/lib/main.cpp
+@@ -1,6 +1,18 @@
+ #include <aurora/main.h>
+ #undef main
+ 
++#if defined(_WIN32)
++#include <SDL3/SDL.h>
++#define SDL_MAIN_HANDLED
+ #include <SDL3/SDL_main.h>
+ 
+-int main(int argc, char** argv) { return aurora_main(argc, argv); }
++int main(int argc, char** argv) {
++  return SDL_RunApp(argc, argv, aurora_main, nullptr);
++}
++#else
++#include <SDL3/SDL_main.h>
++
++int main(int argc, char** argv) {
++  return aurora_main(argc, argv);
++}
++#endif
+diff --git a/lib/system_info.cpp b/lib/system_info.cpp
+index d004fbf..2c2017c 100644
+--- a/lib/system_info.cpp
++++ b/lib/system_info.cpp
+@@ -5,11 +5,19 @@
+ #define WIN32_LEAN_AND_MEAN 1
+ #include <windows.h>
+ #include <combaseapi.h>
++#ifndef AURORA_WINDOWS_STORE
+ #include <Wbemidl.h>
+ #include <comutil.h>
++#endif
+ #include <dxgi.h>
+ #include <wrl/client.h>
+ 
++#if defined(AURORA_WINDOWS_STORE)
++#if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
++#include <intrin.h>
++#endif
++#endif
++
+ template <typename T>
+ using ComPtr = Microsoft::WRL::ComPtr<T>;
+ typedef LONG NTSTATUS, *PNTSTATUS;
+@@ -41,12 +49,14 @@ void log_system_information() {
+   const auto memSize = GetMemoryAmount() / 1024 / 1024;
+   Log.info("Memory: {} MiB", memSize);
+ 
++#ifndef AURORA_WINDOWS_STORE
+ #if defined(__x86_64__) || defined(_M_X64) || defined(_M_X64)
+   Log.info("Architecture: x86_64");
+ #elif defined(__aarch64__) || defined(_M_ARM64)
+   Log.info("Architecture: aarch64");
+ #else
+   Log.info("Architecture: Unknown");
++#endif
+ #endif
+ 
+   Log.info("OS: {}", GetOSVersion());
+@@ -71,7 +81,113 @@ static std::string wideStringToUtf8(std::wstring_view str) {
+   return result;
+ }
+ 
++#if defined(AURORA_WINDOWS_STORE)
++static std::string TrimSpaces(std::string s) {
++  const auto not_space = [](unsigned char c) { return c != ' '; };
++  while (!s.empty() && !not_space(static_cast<unsigned char>(s.front()))) {
++    s.erase(s.begin());
++  }
++  while (!s.empty() && !not_space(static_cast<unsigned char>(s.back()))) {
++    s.pop_back();
++  }
++  return s;
++}
++
++#if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
++static std::string CpuModelFromCpuid() {
++  int regs[4] = {};
++  __cpuid(regs, static_cast<int>(0x80000000u));
++  const auto max_ext = static_cast<unsigned>(regs[0]);
++  if (max_ext < 0x80000004u) {
++    return {};
++  }
++
++  char buf[49] = {};
++  for (unsigned leaf = 0x80000002, off = 0; leaf <= 0x80000004u; ++leaf, off += 16) {
++    __cpuidex(regs, static_cast<int>(leaf), 0);
++    std::memcpy(buf + off + 0, &regs[0], 4);
++    std::memcpy(buf + off + 4, &regs[1], 4);
++    std::memcpy(buf + off + 8, &regs[2], 4);
++    std::memcpy(buf + off + 12, &regs[3], 4);
++  }
++
++  return TrimSpaces(std::string(buf));
++}
++#endif
++
++static std::string SmbiosStringAt(const BYTE* struct_start, BYTE form_len, BYTE str_index) {
++  if (str_index == 0) {
++    return {};
++  }
++  const char* p = reinterpret_cast<const char*>(struct_start + form_len);
++  for (unsigned i = 1; i < str_index && *p != 0; ++i) {
++    p += std::strlen(p) + 1;
++  }
++  if (*p == 0) {
++    return {};
++  }
++  return TrimSpaces(std::string(p));
++}
++
++static std::string CpuModelFromSmbios() {
++  constexpr DWORD kRsmb = 'RSMB';
++  const DWORD need = GetSystemFirmwareTable(kRsmb, 0, nullptr, 0);
++  if (need < 8) {
++    return {};
++  }
++
++  std::vector<BYTE> buf(static_cast<size_t>(need));
++  if (GetSystemFirmwareTable(kRsmb, 0, buf.data(), need) != need) {
++    return {};
++  }
++
++  const DWORD table_len = *reinterpret_cast<const DWORD*>(buf.data() + 4);
++  if (static_cast<size_t>(table_len) + 8 > buf.size()) {
++    return {};
++  }
++
++  const BYTE* table = buf.data() + 8;
++  const BYTE* end = table + table_len;
++
++  for (const BYTE* p = table; p + 4 <= end;) {
++    const BYTE type = p[0];
++    const BYTE size = p[1];
++    if (size < 4 || p + size > end) {
++      break;
++    }
++
++    if (type == 4 && size > 16) {
++      if (std::string name = SmbiosStringAt(p, size, p[16]); !name.empty()) {
++        return name;
++      }
++    }
++
++    const BYTE* str_area = p + size;
++    while (str_area + 1 < end && (str_area[0] != 0 || str_area[1] != 0)) {
++      ++str_area;
++    }
++    if (str_area + 2 > end) {
++      break;
++    }
++    p = str_area + 2;
++  }
++
++  return {};
++}
++#endif
++
+ std::string GetCpuModel() {
++#ifdef AURORA_WINDOWS_STORE
++#if defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64)
++  if (const std::string id = CpuModelFromCpuid(); !id.empty()) {
++    return id;
++  }
++#endif
++  if (const std::string bios = CpuModelFromSmbios(); !bios.empty()) {
++    return bios;
++  }
++  return Unknown;
++#else
+   // Good fucking lord Microsoft, what the fuck is this?
+   // https://learn.microsoft.com/en-us/windows/win32/wmisdk/example--getting-wmi-data-from-the-local-computer
+ 
+@@ -171,6 +287,7 @@ std::string GetCpuModel() {
+   }
+ 
+   return result;
++#endif
+ }
+ 
+ uint64_t GetMemoryAmount() {
+diff --git a/lib/webgpu/gpu.cpp b/lib/webgpu/gpu.cpp
+index b3ae6cd..d32abf4 100644
+--- a/lib/webgpu/gpu.cpp
++++ b/lib/webgpu/gpu.cpp
+@@ -26,9 +26,11 @@
+ #include "gpu_prof.hpp"
+ 
+ #ifdef WEBGPU_DAWN
++#if !defined(AURORA_WINDOWS_STORE)
+ #include "../dawn/TracyPlatform.hpp"
+ #include <dawn/native/DawnNative.h>
+ #endif
++#endif
+ 
+ namespace aurora::gx {
+ void clear_copy_texture_cache() noexcept;
+@@ -73,6 +75,10 @@ bool g_textureComponentSwizzleSupported = false;
+ static std::atomic_bool g_initialized = false;
+ static std::atomic_bool g_vsyncEnabled = true;
+ 
++#if defined(AURORA_WINDOWS_STORE)
++extern "C" __declspec(dllimport) void* uwp_GetWindowReference();
++#endif
++
+ namespace {
+ 
+ AuroraLogLevel wgpu_log_level(wgpu::LoggingType type) {
+@@ -763,7 +769,18 @@ static bool create_surface() {
+   }
+   window::SurfaceLock surfaceLock;
+   release_surface_locked();
++#ifndef AURORA_WINDOWS_STORE
+   g_surface = create_window_surface(g_instance, window, "Surface");
++#else
++  wgpu::SurfaceDescriptorFromWindowsCoreWindow surfaceDesc{};
++  surfaceDesc.sType = wgpu::SType::SurfaceDescriptorFromWindowsCoreWindow;
++  surfaceDesc.coreWindow = uwp_GetWindowReference();
++  const wgpu::SurfaceDescriptor surfaceDescriptor{
++      .nextInChain = reinterpret_cast<const wgpu::ChainedStruct*>(&surfaceDesc),
++      .label = "Surface",
++  };
++  g_surface = g_instance.CreateSurface(&surfaceDescriptor);
++#endif
+   if (!g_surface) {
+     Log.error("Failed to create surface");
+     return false;
+@@ -782,6 +799,7 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
+         .requiredFeatures = requiredInstanceFeatures.data(),
+     };
+ #ifdef WEBGPU_DAWN
++#if !defined(AURORA_WINDOWS_STORE)
+     constexpr std::array instanceToggles{
+         "allow_unsafe_apis",
+     };
+@@ -797,6 +815,7 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
+     dawnInstanceDescriptor.platform = tracy_dawn_platform();
+ #endif
+     instanceDescriptor.nextInChain = &dawnInstanceDescriptor;
++#endif
+ #endif
+     g_instance = wgpu::CreateInstance(&instanceDescriptor);
+     if (!g_instance) {
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index dcc1bd4..fd8c2a6 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -98,7 +98,7 @@ if (AURORA_ENABLE_GX)
+ 
+   target_compile_definitions(gx_fifo_tests PRIVATE AURORA TARGET_PC)
+ 
+-  target_link_libraries(gx_fifo_tests PRIVATE
++  set(_gx_fifo_test_libs
+     gtest
+     gtest_main
+     fmt::fmt
+@@ -106,9 +106,13 @@ if (AURORA_ENABLE_GX)
+     absl::flat_hash_map
+     absl::btree
+     dawn::dawncpp_headers
+-    Tracy::TracyClient
+     ${AURORA_SDL3_TARGET}
+   )
++  if (NOT AURORA_WINDOWS_STORE)
++    list(APPEND _gx_fifo_test_libs Tracy::TracyClient)
++  endif ()
++  target_link_libraries(gx_fifo_tests PRIVATE ${_gx_fifo_test_libs})
++  unset(_gx_fifo_test_libs)
+ 
+   gtest_discover_tests(gx_fifo_tests)
+ 
