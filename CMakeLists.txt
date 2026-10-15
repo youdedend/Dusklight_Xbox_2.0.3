@@ -558,7 +558,9 @@ endif ()
 
 include(cmake/ModSDK.cmake)
 
-if (DUSK_ENABLE_CODE_MODS AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+# Bundled mods link against the desktop game import library (setup_windows_exports), which the
+# UWP static build does not produce, so they are skipped for UWP.
+if (DUSK_ENABLE_CODE_MODS AND NOT DUSK_UWP AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_custom_target(dusklight_mods) # Aggregate target for all in-tree mods
     add_subdirectory(mods/luau_runtime)
     add_subdirectory(mods/template_mod)
