@@ -2,6 +2,11 @@ name: Build UWP candidate (Windows)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/uwp-candidate.yml'
+      - 'ci/port-candidate/**'
 
 permissions:
   contents: read
