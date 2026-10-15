@@ -13,6 +13,7 @@
 #include "dusk/mods/svc/save.hpp"
 #include "dusk/save_manager.hpp"
 #include "dusk/settings.h"
+#include "dusk/ui/file_select.hpp"
 #include "dusk/utilities.hpp"
 #include "format.hpp"
 #include "icon_button.hpp"
@@ -183,7 +184,7 @@ void export_artifact(save_manager::ExportArtifact artifact, std::string pattern)
         .suggestedName = artifact.suggestedName,
         .filters = {{"Save file", std::move(pattern)}},
     };
-    borealis::file_select::export_file(
+    dusk::ui::file_select::export_file(
         std::move(options), [artifact = std::move(artifact)](borealis::file_select::Result result) {
             save_manager::remove_temporary_export(artifact);
             if (result.status != borealis::file_select::Status::Selected &&
@@ -449,7 +450,7 @@ void process_next_import() {
 }
 
 void begin_import() {
-    borealis::file_select::open_file(
+    dusk::ui::file_select::open_file(
         {
             .parentWindow = aurora::window::get_sdl_window(),
             .filters = {{"Save files", "gci;raw;dusksave"}},

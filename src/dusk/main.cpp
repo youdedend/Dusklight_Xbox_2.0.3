@@ -34,11 +34,11 @@ namespace {
 
 bool RestartProcess(int argc, char* argv[]) {
 #if defined(__ANDROID__) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS) ||                           \
-    (defined(TARGET_OS_TV) && TARGET_OS_TV)
+    (defined(TARGET_OS_TV) && TARGET_OS_TV) || defined(_UWP)
     (void)argc;
     (void)argv;
     return false;
-#elif _WIN32
+#elif defined(_WIN32)
     std::wstring commandLine = GetCommandLineW();
     STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(startupInfo);
@@ -160,7 +160,9 @@ void WindowsSetupConsole(bool showConsole) {
 }
 
 int DuskMain(int argc, char* argv[]) {
+#if !defined(_UWP)
     WindowsSetupConsole(ShouldShowWindowsConsole(argc, argv));
+#endif
     const int result = game_main(argc, argv);
     if constexpr (dusk::SupportsProcessRestart) {
         if (dusk::RestartRequested) {
@@ -221,11 +223,15 @@ int DuskMain(int argc, char* argv[]) {
 
 }  // namespace
 
+#ifdef _UWP
+#define SDL_MAIN_EXPORTED
+#include "SDL3/SDL_main.h"
+#endif
 int main(int argc, char* argv[]) {
     return DuskMain(argc, argv);
 }
 
-#if _WIN32
+#if _WIN32 && !_UWP
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     return RunWindowsGuiEntryPoint();
 }

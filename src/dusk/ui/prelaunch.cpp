@@ -11,6 +11,7 @@
 #include "dusk/settings.h"
 #include "dusk/ui/format.hpp"
 #include "dusk/ui/menu_bar.hpp"
+#include "file_select.hpp"
 #include "mod_updates.hpp"
 #include "modal.hpp"
 #include "mods_window.hpp"
@@ -196,6 +197,10 @@ std::optional<DiscVerificationResult> take_finished_disc_verification() {
 }
 
 void begin_update_check() {
+#if defined(_UWP)
+    // The store build updates through the store, so there is no in-app check.
+    return;
+#endif
     if (!getSettings().backend.checkForUpdates.getValue()) {
         return;
     }
@@ -792,7 +797,7 @@ void ensure_initialized() noexcept {
 
 void open_iso_picker() noexcept {
     ensure_initialized();
-    borealis::file_select::open_file(
+    dusk::ui::file_select::open_file(
         {
             .parentWindow = aurora::window::get_sdl_window(),
             .filters = kDiscFileFilters,

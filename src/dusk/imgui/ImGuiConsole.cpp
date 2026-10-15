@@ -268,11 +268,13 @@ namespace dusk {
 
         UpdateSettings();
 
+#ifndef _UWP
         if (ImGui::IsKeyPressed(ImGuiKey_F11)) {
             getSettings().video.enableFullscreen.setValue(!getSettings().video.enableFullscreen);
             VISetWindowFullscreen(getSettings().video.enableFullscreen);
             config::save();
         }
+#endif
 
         if (getSettings().game.enableResetKeybind && ImGui::GetIO().KeyCtrl &&
             ImGui::IsKeyReleased(ImGuiKey_R) && !fpcM_SearchByName(fpcNm_LOGO_SCENE_e))

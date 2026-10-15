@@ -35,6 +35,11 @@ public:
     }
     void clear();
 
+    /** Index of the child row that contains `target`, or -1 if none does. */
+    int child_index_containing(Rml::Element* target) const;
+    /** Number of child rows currently in the pane. */
+    int row_count() const noexcept;
+
 private:
     Type mType;
 };

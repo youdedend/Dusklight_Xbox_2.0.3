@@ -9,7 +9,7 @@
 #include <TargetConditionals.h>
 #endif
 
-#if defined(_WIN32) ||                                                                             \
+#if (defined(_WIN32) && !defined(_UWP)) ||                                                 \
     (defined(__APPLE__) && !TARGET_OS_IOS && !TARGET_OS_TV && !TARGET_OS_MACCATALYST) ||           \
     (defined(__linux__) && !defined(__ANDROID__))
 #define DUSK_CAN_OPEN_DATA_FOLDER 1

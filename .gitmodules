@@ -1,6 +1,7 @@
 [submodule "extern/aurora"]
 	path = extern/aurora
-	url = https://github.com/encounter/aurora.git
+	url = https://github.com/SternXD/aurora.git
+	branch = uwp-dusk-2.0.3
 [submodule "extern/borealis"]
 	path = extern/borealis
 	url = https://github.com/encounter/borealis.git

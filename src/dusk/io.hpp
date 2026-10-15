@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 // I can't believe it's 2026 and neither SDL (no error codes) nor
@@ -95,5 +96,12 @@ public:
 
     FILE* ToInner();
 };
+
+#if defined(_UWP)
+/**
+ * Returns the app's sandboxed local-state folder on UWP, or nullopt if it is unavailable.
+ */
+std::optional<std::filesystem::path> uwp_local_folder_path();
+#endif
 
 }  // namespace dusk::io

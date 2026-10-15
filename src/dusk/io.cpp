@@ -3,7 +3,11 @@
 #include <filesystem>
 #include <system_error>
 
+#include "dusk/app_info.hpp"
 #include "dusk/io.hpp"
+
+#include <SDL3/SDL_filesystem.h>
+#include <borealis/io.hpp>
 
 #if _WIN32
 #define MODE_TYPE wchar_t
@@ -188,3 +192,26 @@ FILE* FileStream::ToInner() {
 }
 
 }  // namespace dusk::io
+
+#if defined(_UWP)
+std::optional<std::filesystem::path> dusk::io::uwp_local_folder_path() {
+    char* pref = SDL_GetPrefPath(dusk::AppInfo.orgName.data(), dusk::AppName);
+    if (pref == nullptr) {
+        return std::nullopt;
+    }
+    const std::filesystem::path p = borealis::io::fs_path_from_utf8(pref);
+    SDL_free(pref);
+    if (p.empty()) {
+        return std::nullopt;
+    }
+    std::error_code ec;
+    const std::filesystem::path out = std::filesystem::absolute(p, ec).lexically_normal();
+    if (ec || out.empty()) {
+        return std::nullopt;
+    }
+    if (!std::filesystem::is_directory(out, ec)) {
+        return std::nullopt;
+    }
+    return out;
+}
+#endif

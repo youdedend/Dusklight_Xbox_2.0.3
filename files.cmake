@@ -1583,6 +1583,10 @@ set(DUSK_FILES
         src/dusk/ui/controller_config.cpp
         src/dusk/ui/controller_config.hpp
         src/dusk/ui/controls.hpp
+        src/dusk/ui/file_browser.cpp
+        src/dusk/ui/file_browser.hpp
+        src/dusk/ui/file_select.cpp
+        src/dusk/ui/file_select.hpp
         src/dusk/ui/document.cpp
         src/dusk/ui/document.hpp
         src/dusk/ui/drop_install_modal.cpp

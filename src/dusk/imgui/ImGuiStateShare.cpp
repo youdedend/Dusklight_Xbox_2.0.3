@@ -8,6 +8,7 @@
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/settings.h"
+#include "dusk/ui/file_select.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "f_op/f_op_overlap_mng.h"
@@ -374,7 +375,7 @@ void ImGuiStateShare::draw(bool& open) {
 
     ImGui::SameLine();
     if (ImGui::Button("Load Pack")) {
-        borealis::file_select::open_file(
+        dusk::ui::file_select::open_file(
             {
                 .parentWindow = aurora::window::get_sdl_window(),
                 .filters = {{"State pack", "json"}},

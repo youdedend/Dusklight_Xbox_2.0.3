@@ -2,6 +2,7 @@
 
 #include "bool_button.hpp"
 #include "controller_config.hpp"
+#include "file_select.hpp"
 #include "graphics_tuner.hpp"
 #include "menu_bar.hpp"
 #include "modal.hpp"
@@ -547,7 +548,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                         pane.add_button("Change Data Folder").on_pressed([] {
                             const auto defaultLocation =
                                 borealis::io::fs_path_to_string(data::configured_data_path());
-                            borealis::file_select::open_folder(
+                            dusk::ui::file_select::open_folder(
                                 {
                                     .parentWindow = aurora::window::get_sdl_window(),
                                     .defaultLocation = defaultLocation,
@@ -555,7 +556,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                                 },
                                 &data_folder_dialog_callback);
                         });
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(_UWP)
                         pane.add_button("Portable Mode").on_pressed([] {
                             if (data::set_portable_data_path()) {
                                 mDoAud_seStartMenu(kSoundItemChange);
@@ -618,6 +619,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     }
                     pane.add_rml("<br/>Changes require a restart.");
                 });
+#ifndef _UWP
             leftPane.register_control(
                 leftPane.add_select_button({
                     .key = "Graphics Backend",
@@ -641,6 +643,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     }
                     pane.add_rml("<br/>Changes require a restart.");
                 });
+#endif
             leftPane.register_control(
                 leftPane.add_select_button({
                     .key = "Save File Type",
@@ -681,6 +684,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
 
         leftPane.add_section("Display");
 
+#ifndef _UWP
         leftPane.register_control(leftPane.add_button("Toggle Fullscreen").on_pressed([] {
             mDoAud_seStartMenu(kSoundItemChange);
             getSettings().video.enableFullscreen.setValue(!getSettings().video.enableFullscreen);
@@ -696,6 +700,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             VICenterWindow();
         }),
             rightPane, [](Pane& pane) { pane.clear(); });
+#endif
         config_bool_select(leftPane, rightPane, getSettings().video.enableVsync,
             {
                 .key = "Enable VSync",
@@ -712,12 +717,14 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                             value ? AURORA_VIEWPORT_FIT : AURORA_VIEWPORT_STRETCH);
                     },
             });
+#ifndef _UWP
         config_bool_select(leftPane, rightPane, getSettings().game.pauseOnFocusLost,
             {
                 .key = "Pause on Focus Lost",
                 .helpText = "Pause the game when window focus is lost.",
                 .isDisabled = [] { return IsMobile || speedrun::isActive(); },
             });
+#endif
         leftPane.register_control(
             leftPane.add_select_button({
                 .key = "Show FPS Counter",
@@ -942,6 +949,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 pane.clear();
                 pane.add_text("Open input binding configuration.");
             });
+#ifndef _UWP
         config_bool_select(leftPane, rightPane, getSettings().game.allowBackgroundInput,
             {
                 .key = "Allow Background Inputs",
@@ -949,6 +957,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .onChange = [](bool value) { aurora_set_background_input(value); },
             });
 
+#endif
 #if TOUCH_CONTROLS_AVAILABLE
         leftPane.add_section("Touch");
         addOption("Touch Controls", getSettings().game.enableTouchControls,
@@ -1581,12 +1590,14 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .key = "Show Shader Compilation",
                 .helpText = "Show an overlay when shaders are being compiled for your hardware.",
             });
+#ifndef _UWP
         config_bool_select(leftPane, rightPane, getSettings().backend.checkForUpdates,
             {
                 .key = "Check for Dusklight Updates",
                 .helpText = "Checks GitHub releases for a new Dusklight version on startup.<br/><br/>"
                             "No personal information is transmitted or collected.",
             });
+#endif
 #if BOREALIS_HAS_DISCORD
         config_bool_select(leftPane, rightPane, getSettings().game.enableDiscordPresence,
             {

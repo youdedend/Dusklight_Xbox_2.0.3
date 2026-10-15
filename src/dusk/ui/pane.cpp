@@ -167,6 +167,22 @@ bool Pane::focus_last() {
     return false;
 }
 
+int Pane::child_index_containing(Rml::Element* target) const {
+    if (target == nullptr) {
+        return -1;
+    }
+    for (int i = 0; i < static_cast<int>(mChildren.size()); ++i) {
+        if (mChildren[static_cast<std::size_t>(i)]->contains(target)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int Pane::row_count() const noexcept {
+    return static_cast<int>(mChildren.size());
+}
+
 void Pane::clear() {
     clear_children();
 }

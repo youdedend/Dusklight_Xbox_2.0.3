@@ -1,5 +1,7 @@
 #include "file_button.hpp"
 
+#include "dusk/ui/file_select.hpp"
+
 #include <aurora/lib/window.hpp>
 #include <borealis/io.hpp>
 
@@ -51,7 +53,7 @@ void FileButton::open_picker() {
         }
     };
     if (mDirectoryMode) {
-        borealis::file_select::open_folder(
+        dusk::ui::file_select::open_folder(
             {
                 .parentWindow = aurora::window::get_sdl_window(),
                 .defaultLocation = defaultLocation,
@@ -59,7 +61,7 @@ void FileButton::open_picker() {
             std::move(complete));
         return;
     }
-    borealis::file_select::open_file(
+    dusk::ui::file_select::open_file(
         {
             .parentWindow = aurora::window::get_sdl_window(),
             .filters = mFilters,

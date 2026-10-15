@@ -8,6 +8,7 @@
 #include <borealis/log.hpp>
 #include "dusk/config.hpp"
 #include "dusk/mods/loader/loader.hpp"
+#include "dusk/ui/file_select.hpp"
 #include "dusk/utilities.hpp"
 #include "mods/svc/file.h"
 
@@ -151,7 +152,7 @@ ModResult begin_pick(ModContext* context, const FilePickOptions* options, FilePi
     const std::string defaultLocation =
         options->default_location != nullptr ? options->default_location : "";
     if (folder) {
-        borealis::file_select::open_folder(
+        dusk::ui::file_select::open_folder(
             {
                 .parentWindow = aurora::window::get_sdl_window(),
                 .defaultLocation = defaultLocation,
@@ -168,7 +169,7 @@ ModResult begin_pick(ModContext* context, const FilePickOptions* options, FilePi
     for (uint32_t i = 0; i < options->filter_count; ++i) {
         filters.push_back({options->filters[i].name, options->filters[i].pattern});
     }
-    borealis::file_select::open_file(
+    dusk::ui::file_select::open_file(
         {
             .parentWindow = aurora::window::get_sdl_window(),
             .filters = std::move(filters),
@@ -218,7 +219,7 @@ ModResult begin_export(ModContext* context, const char* sourceLocation, const ch
     };
     s_pendingPick = pending;
     try {
-        borealis::file_select::export_file(
+        dusk::ui::file_select::export_file(
             std::move(options), [pending](borealis::file_select::Result result) {
                 invoke_pick(
                     pending, map_picker_status(result.status), result.locations, result.message);

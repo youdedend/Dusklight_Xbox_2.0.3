@@ -186,6 +186,17 @@
       ]
     },
     {
+      "name": "windows-msvc-relwithdebinfo-uwp",
+      "displayName": "Windows (MSVC) RelWithDebInfo for UWP",
+      "inherits": [
+        "relwithdebinfo",
+        "windows-msvc"
+      ],
+      "cacheVariables": {
+        "DUSK_UWP": "ON"
+      }
+    },
+    {
       "name": "windows-arm64-msvc",
       "displayName": "Windows ARM64 (MSVC)",
       "inherits": [
@@ -681,6 +692,12 @@
       "configurePreset": "windows-msvc-relwithdebinfo",
       "description": "Windows (MSVC) release build with debug info",
       "displayName": "Windows (MSVC) RelWithDebInfo"
+    },
+    {
+      "name": "windows-msvc-relwithdebinfo-uwp",
+      "configurePreset": "windows-msvc-relwithdebinfo-uwp",
+      "description": "Windows (MSVC) release build with debug info, as a static library for the UWP host",
+      "displayName": "Windows (MSVC) RelWithDebInfo (UWP)"
     },
     {
       "name": "windows-clang-debug",
