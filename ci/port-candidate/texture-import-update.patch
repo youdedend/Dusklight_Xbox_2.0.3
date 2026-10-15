@@ -1,0 +1,886 @@
+diff --git a/files.cmake b/files.cmake
+index cb28c84..fb5c45e 100644
+--- a/files.cmake
++++ b/files.cmake
+@@ -1597,6 +1597,10 @@ set(DUSK_FILES
+         src/dusk/ui/graphics_tuner.hpp
+         src/dusk/ui/group_button.cpp
+         src/dusk/ui/group_button.hpp
++        src/dusk/texture_pack_import.cpp
++        src/dusk/texture_pack_import.hpp
++        src/dusk/ui/texture_pack_menu.cpp
++        src/dusk/ui/texture_pack_menu.hpp
+         src/dusk/ui/file_browser.cpp
+         src/dusk/ui/file_browser.hpp
+         src/dusk/ui/file_select.cpp
+diff --git a/platforms/uwp/Package.appxmanifest b/platforms/uwp/Package.appxmanifest
+index 624b935..eac7328 100644
+--- a/platforms/uwp/Package.appxmanifest
++++ b/platforms/uwp/Package.appxmanifest
+@@ -10,7 +10,7 @@
+   <Identity
+     Name="Dusklight"
+     Publisher="CN=odolwa"
+-    Version="2.0.3.0" />
++    Version="2.0.3.1" />
+ 
+   <mp:PhoneIdentity PhoneProductId="5a528e66-e0fc-43fb-b377-ce0b1bb0d3e8" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
+ 
+diff --git a/platforms/uwp/README.md b/platforms/uwp/README.md
+index 1664ce9..7766481 100644
+--- a/platforms/uwp/README.md
++++ b/platforms/uwp/README.md
+@@ -1,6 +1,6 @@
+ # Dusklight v2.0.3 — reconstructed UWP candidate
+ 
+-This is a **source-port candidate**, not a verified Windows/Xbox release. The main tree is based on upstream Dusklight `v2.0.3` (`40457c6adb381928e4b5fef6ed459ed291edd5e2`). Aurora's UWP changes are ported onto its matching `3227d76c60e1e782ca576610bce61c9e7744d8be` baseline, preserving the newer card-save implementation.
++This is a **UWP test port**, not a runtime-verified Xbox release. Package 2.0.3.0 compiled, packaged and passed test-signature verification on Windows; the texture-import update is version **2.0.3.1**. Xbox device testing is still required. The main tree is based on upstream Dusklight `v2.0.3` (`40457c6adb381928e4b5fef6ed459ed291edd5e2`). Aurora's UWP changes are ported onto its matching `3227d76c60e1e782ca576610bce61c9e7744d8be` baseline, preserving the newer card-save implementation.
+ 
+ ## Windows prerequisites
+ 
+@@ -21,7 +21,7 @@ cmake -S platforms/uwp -B cmake-build-uwp-host -G "Visual Studio 17 2022" -A x64
+ cmake --build cmake-build-uwp-host --config RelWithDebInfo
+ ```
+ 
+-Or use `./platforms/uwp/Build-Uwp.ps1`; `-GenerateUnsignedPackage` requests an unsigned AppX. The helper and the complete Windows build remain unverified. To install, sign the package with your own certificate matching the manifest Publisher; do not commit a private key/PFX. The existing package identity/Publisher is preserved, and the package version is `2.0.3.0`.
++Or use `./platforms/uwp/Build-Uwp.ps1`; `-GenerateUnsignedPackage` requests an unsigned AppX. The helper completed the previous 2.0.3.0 Windows build successfully; see GitHub Actions for the current update build result. To install, sign the package with your own certificate matching the manifest Publisher; do not commit a private key/PFX. The existing package identity/Publisher is preserved, and the package version is `2.0.3.1`.
+ 
+ The main build produces a static game library, plus `uwp_link_libs_RelWithDebInfo.txt`. Linker switches are emitted separately in `uwp_link_options_<config>.txt` and passed through `target_link_options`. The host reads the generated link closure instead of an old hand-maintained archive list. It rejects mismatched dependency revision files. The main build and host both pin `uwp-dep` to `810cdcb672383045a8b03d1d55bb535352d7d46f`. If you change that revision, update both configurations and verify WebGPU/SDL/nod header and DLL compatibility.
+ 
+@@ -53,3 +53,7 @@ This requires Linux `g++`, CMake and Ninja, and tests extension matching, filena
+ 3. Verify first launch, settings/data migration and persistence, controller navigation, pick/cancel/filter/new folder, failed and successful export, removable paths, suspend/resume and cold pipeline-cache creation on Windows UWP and Xbox.
+ 4. Complete or explicitly scope the unfinished code-mod ABI/sandbox support.
+ 5. Publish the Aurora commit first, then the Dusklight branch with its matching gitlink.
++
++## USB texture packs (2.0.3.1)
++
++See [TEXTURE_PACKS.md](TEXTURE_PACKS.md) for the menu path, supported extracted pack layout, storage behavior and Xbox validation checklist.
+diff --git a/platforms/uwp/TEXTURE_PACKS.md b/platforms/uwp/TEXTURE_PACKS.md
+new file mode 100644
+index 0000000..e4bdb14
+--- /dev/null
++++ b/platforms/uwp/TEXTURE_PACKS.md
+@@ -0,0 +1,39 @@
++# USB texture pack import — package 2.0.3.1
++
++## In-game steps
++
++1. Extract a Dusklight-compatible texture pack on your computer and copy its folder to USB. This importer accepts **folders**, not ZIP/7z archives or mod packages.
++2. Open **Settings → Video → Rendering → Texture Pack → Import Texture Pack from USB...**. The same Video settings are available before launching the game.
++3. Pick the USB drive, enter the extracted pack folder, and choose **Use this folder**. Confirm **Import**. If a drive is not listed or access is denied, do not change console security settings; record the exact result for device testing.
++4. Keep USB connected while scanning/copying. The dialog reports file/byte progress and supports cancellation. Selection, scanning and copying do not change the USB source or current pack.
++5. On successful completion the copied pack is enabled and selected in the saved configuration. The USB is no longer needed. Texture registrations are reloaded on the render/UI thread; restart if an already displayed texture has not refreshed.
++6. **Use Default Texture Folder** switches back to your existing manual `texture_replacements` folder. The **Enable Texture Replacements** switch still controls both sources.
++
++## Files and compatibility
++
++- PNG and DDS texture files are copied recursively, preserving relative subfolders and filenames, including mip sidecars. Other extensions are ignored.
++- At least one filename must be recognized by Aurora's actual replacement filename parser, normally `tex1_*.png` / `tex1_*.dds`. Images without compatible names, unrelated archives and native code mods are not automatically converted into texture packs.
++- This importer does not change pack format support or priority: mod texture overrides still take precedence over user texture replacements.
++- Links/junctions that resolve outside the source, symbolic links, unsupported file types, unreadable files, deep directory trees and overlapping source/destination selections are rejected. The file-count limit is 200,000 and directory-depth limit is 64.
++
++## Storage and failure behavior
++
++- New imports are copied into private `.import-*` staging folders under `<data folder>/texture_packs/` and renamed to an independent `pack-<id>` directory only after copying completes.
++- The active pack is not replaced during copying. There is no modification or deletion of existing `texture_replacements` files, prior completed imports, saves, or the USB source.
++- Only the managed pack ID is saved as `backend.importedTexturePack`; arbitrary external paths cannot be activated through that setting. Empty/invalid/missing IDs fall back to the original manual folder.
++- Selection activation and settings persistence run on the UI thread after the worker finishes. If saving the selection fails, the previous selection is restored.
++- Cancellation, detected USB/source changes and ordinary copy failures clean up this attempt's temporary files. Force-closing the app or losing power may leave an **inactive** `.import-*` folder; it is never selected as a pack.
++- Imports are deliberately kept as backups. Re-importing uses additional app storage; there is no automatic deletion of your old packs. A preflight check requires the whole copied pack to fit plus 8 MiB headroom; later disk-write failures are still handled without switching the active pack.
++- If a very late Cancel races with completed copying, the finished copy can remain in app storage but is not activated.
++
++## Checks and limits of verification
++
++Portable tests cover nested/Unicode paths, preserved sources/manual packs, repeated imports, invalid packs and selection IDs, source/destination overlap, links, USB source changes, cancellation before/during copying, staging cleanup and free-space preflight. Syntax checks cover the UWP menu integration. These do **not** establish Xbox runtime behavior.
++
++Required Xbox checks:
++- USB drive enumeration/access and controller-only navigation; cancel from the browser and confirmation dialog.
++- Successful small and large PNG/DDS imports, subfolders, free-space errors, USB removal during scanning/copying and cancellation.
++- Live texture refresh, restart persistence, enabling/disabling replacements and reverting to the default manual folder.
++- Existing saves and manual texture folders remain unchanged; test both prelaunch and in-game menus.
++
++This remains a test release. Code mods are disabled. The minimum package OS requirement remains unchanged from the previous build. A new ephemeral self-signed certificate is needed because the prior test signing key was intentionally not retained; in-place upgrade/trust behavior must not be assumed. Back up saves and do not uninstall an older installation just to try the update.
+diff --git a/src/dusk/config.cpp b/src/dusk/config.cpp
+index 9afdf58..5ab155c 100644
+--- a/src/dusk/config.cpp
++++ b/src/dusk/config.cpp
+@@ -536,9 +536,13 @@ void load_arg_override(std::string_view name, std::string_view value) {
+ }
+ 
+ void save() {
++    (void)save_checked();
++}
++
++bool save_checked() {
+     const auto configJsonPath = GetConfigJsonPath();
+     if (configJsonPath.empty()) {
+-        return;
++        return false;
+     }
+     const auto configPathString = borealis::io::fs_path_to_string(configJsonPath);
+ 
+@@ -561,8 +565,10 @@ void save() {
+         const auto tempConfigJsonPath = GetTempConfigJsonPath(configJsonPath);
+         io::FileStream::WriteAllText(tempConfigJsonPath, j.dump(4));
+         ReplaceFile(tempConfigJsonPath, configJsonPath);
++        return true;
+     } catch (const std::exception& e) {
+         DuskConfigLog.error("Failed to save config to '{}': {}", configPathString, e.what());
++        return false;
+     }
+ }
+ 
+diff --git a/src/dusk/config.hpp b/src/dusk/config.hpp
+index 5359143..50c93a7 100644
+--- a/src/dusk/config.hpp
++++ b/src/dusk/config.hpp
+@@ -112,6 +112,8 @@ void shutdown();
+ /**
+  * \brief Save the config to file.
+  */
++// Returns false if the atomic settings write failed. Existing callers can use save().
++bool save_checked();
+ void save();
+ 
+ /**
+diff --git a/src/dusk/settings.cpp b/src/dusk/settings.cpp
+index 1c6d6b9..316d12a 100644
+--- a/src/dusk/settings.cpp
++++ b/src/dusk/settings.cpp
+@@ -184,6 +184,7 @@ UserSettings g_userSettings = {
+         .checkForModUpdates {"backend.checkForModUpdates", true},
+         .cardFileType {"backend.cardFileType", static_cast<int>(CARD_GCIFOLDER)},
+         .enableAdvancedSettings {"backend.enableAdvancedSettings", false},
++        .importedTexturePack {"backend.importedTexturePack", ""},
+     },
+ 
+     // Not sure if there's a better way to declare this
+@@ -403,6 +404,7 @@ void registerSettings() {
+     Register(g_userSettings.backend.checkForModUpdates);
+     Register(g_userSettings.backend.cardFileType);
+     Register(g_userSettings.backend.enableAdvancedSettings);
++    Register(g_userSettings.backend.importedTexturePack);
+ 
+     Register(g_userSettings.actionBindings.firstPersonCamera[0]);
+     Register(g_userSettings.actionBindings.firstPersonCamera[1]);
+diff --git a/src/dusk/settings.h b/src/dusk/settings.h
+index 651a4cd..29445d9 100644
+--- a/src/dusk/settings.h
++++ b/src/dusk/settings.h
+@@ -345,6 +345,7 @@ struct UserSettings {
+         ConfigVar<bool> checkForModUpdates;
+         ConfigVar<int> cardFileType;
+         ConfigVar<bool> enableAdvancedSettings;
++        ConfigVar<std::string> importedTexturePack;
+     } backend;
+ 
+     // Arrays of size 4 for 4 ports
+diff --git a/src/dusk/texture_pack_import.cpp b/src/dusk/texture_pack_import.cpp
+new file mode 100644
+index 0000000..548f194
+--- /dev/null
++++ b/src/dusk/texture_pack_import.cpp
+@@ -0,0 +1,178 @@
++#include "texture_pack_import.hpp"
++
++#include <algorithm>
++#include <array>
++#include <chrono>
++#include <fstream>
++#include <limits>
++#include <string>
++#include <vector>
++#if defined(_WIN32)
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#endif
++
++namespace dusk::texture_packs {
++namespace {
++namespace fs = std::filesystem;
++struct File { fs::path relative; uint64_t bytes; };
++
++void check_cancel(const ImportProgress& progress) {
++    if (progress.cancel.load(std::memory_order_relaxed)) throw ImportCancelled{};
++}
++bool contains(const fs::path& parent, const fs::path& child) {
++    auto p = parent.begin(), c = child.begin();
++    for (; p != parent.end(); ++p, ++c) {
++        if (c == child.end()) return false;
++#if defined(_WIN32)
++        // Windows drive letters and path components are case-insensitive.
++        if (CompareStringOrdinal(p->c_str(), -1, c->c_str(), -1, TRUE) != CSTR_EQUAL) return false;
++#else
++        if (*p != *c) return false;
++#endif
++    }
++    return true;
++}
++bool texture_extension(const fs::path& path) {
++    auto ext = path.extension().u8string();
++    for (auto& ch : ext) if (ch >= u8'A' && ch <= u8'Z') ch = static_cast<char8_t>(ch + (u8'a' - u8'A'));
++    return ext == u8".png" || ext == u8".dds";
++}
++void validate_entry(const fs::path& path, const fs::path& source) {
++    if (fs::is_symlink(fs::symlink_status(path)) || !contains(source, fs::canonical(path))) {
++        throw std::runtime_error("Linked files/folders are not supported. Select an extracted texture pack without links.");
++    }
++}
++}  // namespace
++
++bool valid_pack_id(std::string_view id) noexcept {
++    if (!id.starts_with("pack-") || id.size() <= 5 || id.size() > 80) return false;
++    const auto separator = id.find('-', 5);
++    if (separator == std::string_view::npos || separator == 5 || separator + 1 == id.size()) return false;
++    auto digits = [](std::string_view value) {
++        return std::all_of(value.begin(), value.end(), [](char c) { return c >= '0' && c <= '9'; });
++    };
++    return digits(id.substr(5, separator - 5)) && digits(id.substr(separator + 1));
++}
++
++fs::path resolve_directory(const fs::path& dataRoot, std::string_view id) {
++    if (valid_pack_id(id)) {
++        const auto selected = dataRoot / "texture_packs" / std::string{id};
++        std::error_code ec;
++        if (fs::is_directory(selected, ec) && !fs::is_symlink(fs::symlink_status(selected, ec))) return selected;
++    }
++    return dataRoot / "texture_replacements";
++}
++
++ImportResult import_directory(const fs::path& sourcePath, const fs::path& managedRoot,
++    ImportProgress& progress, const TextureNameValidator& isReplacement) {
++    fs::path staging;
++    bool ownsStaging = false;
++    try {
++        progress.phase = ImportPhase::Scanning;
++        progress.totalFiles = 0; progress.totalBytes = 0;
++        progress.copiedFiles = 0; progress.copiedBytes = 0;
++        check_cancel(progress);
++        if (!isReplacement) throw std::runtime_error("A texture filename validator is required.");
++        if (fs::is_symlink(fs::symlink_status(sourcePath))) {
++            throw std::runtime_error("Select the real texture pack folder, not a linked folder.");
++        }
++        const auto source = fs::canonical(sourcePath);
++        if (!fs::is_directory(source) || source.relative_path().empty()) {
++            throw std::runtime_error("Select an extracted texture pack folder, not a USB drive root or ZIP file.");
++        }
++        const auto destination = fs::weakly_canonical(fs::absolute(managedRoot));
++        if (contains(source, destination) || contains(destination, source)) {
++            throw std::runtime_error("The source must be outside the app's managed texture_packs folder.");
++        }
++
++        std::vector<File> files;
++        uint64_t total = 0, replacements = 0;
++        // Deliberately do not follow links or skip access errors: an incomplete
++        // USB scan must fail without changing the active pack.
++        for (fs::recursive_directory_iterator it(source), end; it != end; ++it) {
++            check_cancel(progress);
++            if (it.depth() > 64) throw std::runtime_error("Texture pack folders are nested too deeply.");
++            validate_entry(it->path(), source);
++            const auto status = it->symlink_status();
++            if (fs::is_directory(status)) continue;
++            if (!fs::is_regular_file(status)) throw std::runtime_error("The texture pack contains an unsupported file type.");
++            if (!texture_extension(it->path())) continue;
++            if (files.size() >= 200'000) throw std::runtime_error("This texture pack contains too many files (limit: 200,000).");
++            const auto size = it->file_size();
++            if (size > std::numeric_limits<uint64_t>::max() - total) throw std::runtime_error("Texture pack size overflow.");
++            total += size;
++            files.push_back({it->path().lexically_relative(source), size});
++            if (isReplacement(it->path())) ++replacements;
++            progress.totalFiles = files.size(); progress.totalBytes = total;
++        }
++        if (!replacements) {
++            throw std::runtime_error("No supported texture replacements found. Extract the pack first and select the folder containing tex1_*.png or tex1_*.dds files (subfolders are included).");
++        }
++        check_cancel(progress);
++        fs::create_directories(destination);
++        const auto available = fs::space(destination).available;
++        constexpr uint64_t margin = 8 * 1024 * 1024;
++        if (total > available || available - total < margin) {
++            throw std::runtime_error("Not enough free app storage. The whole pack must fit, plus 8 MiB of free space; existing packs are kept.");
++        }
++
++        static std::atomic<uint64_t> sequence{0};
++        fs::path final;
++        for (unsigned attempt = 0; attempt != 100; ++attempt) {
++            const auto tick = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
++            const auto suffix = std::to_string(tick) + "-" + std::to_string(sequence++);
++            staging = destination / (".import-" + suffix);
++            final = destination / ("pack-" + suffix);
++            if (fs::exists(final)) continue;
++            if (fs::create_directory(staging)) { ownsStaging = true; break; }
++        }
++        if (!ownsStaging) throw std::runtime_error("Cannot create a temporary texture pack folder.");
++        progress.phase = ImportPhase::Copying;
++        std::array<char, 256 * 1024> buffer{};
++        for (const auto& file : files) {
++            check_cancel(progress);
++            const auto inputPath = source / file.relative;
++            validate_entry(inputPath, source);
++            if (!fs::is_regular_file(inputPath) || fs::file_size(inputPath) != file.bytes) {
++                throw std::runtime_error("The USB pack changed during import. Keep it connected and try again.");
++            }
++            const auto outputPath = staging / file.relative;
++            fs::create_directories(outputPath.parent_path());
++            std::ifstream input(inputPath, std::ios::binary);
++            if (!input) throw std::runtime_error("Cannot read a texture file. Check USB access and keep the drive connected.");
++            std::ofstream output;
++            output.exceptions(std::ios::badbit | std::ios::failbit);
++            output.open(outputPath, std::ios::binary | std::ios::trunc);
++            uint64_t copied = 0;
++            while (input) {
++                check_cancel(progress);
++                input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
++                const auto count = input.gcount();
++                if (count > 0) {
++                    copied += static_cast<uint64_t>(count);
++                    if (copied > file.bytes) throw std::runtime_error("A texture file changed during import. Try again.");
++                    output.write(buffer.data(), count);
++                    progress.copiedBytes.fetch_add(static_cast<uint64_t>(count), std::memory_order_relaxed);
++                }
++            }
++            if (!input.eof() || copied != file.bytes) throw std::runtime_error("USB read failed or a texture file changed. The previous pack is unchanged.");
++            output.flush(); output.close();
++            ++progress.copiedFiles;
++        }
++        check_cancel(progress);
++        // Only complete packs get selectable IDs. A crash during copy leaves an
++        // unselected .import-* directory, never a partially activated pack.
++        fs::rename(staging, final);
++        ownsStaging = false;
++        progress.phase = ImportPhase::Complete;
++        return {final, static_cast<uint64_t>(files.size()), total};
++    } catch (...) {
++        if (ownsStaging) { std::error_code ignored; fs::remove_all(staging, ignored); }
++        progress.phase = progress.cancel.load() ? ImportPhase::Cancelled : ImportPhase::Failed;
++        throw;
++    }
++}
++}  // namespace dusk::texture_packs
+diff --git a/src/dusk/texture_pack_import.hpp b/src/dusk/texture_pack_import.hpp
+new file mode 100644
+index 0000000..5d2c8b0
+--- /dev/null
++++ b/src/dusk/texture_pack_import.hpp
+@@ -0,0 +1,39 @@
++#pragma once
++
++#include <atomic>
++#include <cstdint>
++#include <filesystem>
++#include <functional>
++#include <stdexcept>
++#include <string_view>
++
++namespace dusk::texture_packs {
++
++enum class ImportPhase { Scanning, Copying, Complete, Cancelled, Failed };
++struct ImportProgress {
++    std::atomic<bool> cancel{false};
++    std::atomic<ImportPhase> phase{ImportPhase::Scanning};
++    std::atomic<uint64_t> totalFiles{0}, totalBytes{0}, copiedFiles{0}, copiedBytes{0};
++};
++struct ImportResult {
++    std::filesystem::path directory;
++    uint64_t files = 0, bytes = 0;
++};
++class ImportCancelled final : public std::runtime_error {
++public:
++    ImportCancelled() : std::runtime_error("Texture pack import cancelled. The previous pack is unchanged.") {}
++};
++using TextureNameValidator = std::function<bool(const std::filesystem::path&)>;
++
++// Copies PNG/DDS files into a new, privately staged directory, then renames it
++// into place. Does not modify the USB source, existing packs, or game settings.
++// Throws on failure/cancel; only staging data created by this call is removed.
++ImportResult import_directory(const std::filesystem::path& source,
++    const std::filesystem::path& managedRoot, ImportProgress& progress,
++    const TextureNameValidator& isReplacement);
++
++bool valid_pack_id(std::string_view id) noexcept;
++// Invalid/missing selections fall back to the existing manual-install folder.
++std::filesystem::path resolve_directory(const std::filesystem::path& dataRoot, std::string_view id);
++
++}  // namespace dusk::texture_packs
+diff --git a/src/dusk/texture_replacements.cpp b/src/dusk/texture_replacements.cpp
+index 118989c..4f52b43 100644
+--- a/src/dusk/texture_replacements.cpp
++++ b/src/dusk/texture_replacements.cpp
+@@ -5,6 +5,9 @@
+ #include "dusk/logging.h"
+ #include "dusk/main.h"
+ #include "dusk/settings.h"
++#if defined(_UWP)
++#include "dusk/texture_pack_import.hpp"
++#endif
+ 
+ namespace dusk::texture_replacements {
+ namespace {
+@@ -19,7 +22,12 @@ void reload() {
+         return;
+     }
+ 
++#if defined(_UWP)
++    const auto root = texture_packs::resolve_directory(ConfigPath,
++        getSettings().backend.importedTexturePack.getValue());
++#else
+     const auto root = ConfigPath / "texture_replacements";
++#endif
+     s_directoryGroup = aurora::texture::load_replacement_directory(
+         root, {.priority = kUserTextureReplacementPriority});
+     DuskLog.info("Texture replacement directory loaded: {} registration(s)",
+diff --git a/src/dusk/ui/file_browser.cpp b/src/dusk/ui/file_browser.cpp
+index 404bf1b..27fd87d 100644
+--- a/src/dusk/ui/file_browser.cpp
++++ b/src/dusk/ui/file_browser.cpp
+@@ -567,6 +567,11 @@ FileBrowser::FileBrowser(FileBrowserPurpose purpose, std::vector<file_select::Fi
+     if (mCurrent.empty()) mCurrent = dusk::io::uwp_local_folder_path().value_or(std::filesystem::path{});
+ #endif
+     if (mCurrent.empty()) mCurrent = initial_browser_directory();
++#if defined(_WIN32)
++    // Empty initial locations (including texture-pack imports) start at the
++    // drive list instead of making the user climb out of LocalState first.
++    if (mDefaultLocation.empty()) mBrowseMode = BrowseMode::SelectDrive;
++#endif
+     refresh_list();
+ 
+     listen(
+diff --git a/src/dusk/ui/settings.cpp b/src/dusk/ui/settings.cpp
+index b9e7f8c..69d1870 100644
+--- a/src/dusk/ui/settings.cpp
++++ b/src/dusk/ui/settings.cpp
+@@ -11,6 +11,7 @@
+ #include "prelaunch.hpp"
+ #include "saves_window.hpp"
+ #include "touch_controls_editor.hpp"
++#include "texture_pack_menu.hpp"
+ #include "ui.hpp"
+ 
+ #include "dusk/app_info.hpp"
+@@ -846,6 +847,9 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
+                 .title = "Enable Texture Replacements",
+                 .helpText = kTextureReplacementHelpText,
+             });
++#if defined(_UWP)
++        build_texture_pack_control(leftPane, rightPane);
++#endif
+         leftPane.register_control(
+             leftPane.add_select_button({
+                 .key = "Unlock Framerate",
+diff --git a/src/dusk/ui/texture_pack_menu.cpp b/src/dusk/ui/texture_pack_menu.cpp
+new file mode 100644
+index 0000000..223295c
+--- /dev/null
++++ b/src/dusk/ui/texture_pack_menu.cpp
+@@ -0,0 +1,198 @@
++#include "texture_pack_menu.hpp"
++
++#if defined(_UWP)
++#include "file_select.hpp"
++#include "format.hpp"
++#include "modal.hpp"
++#include "pane.hpp"
++#include "ui.hpp"
++#include "dusk/config.hpp"
++#include "dusk/main.h"
++#include "dusk/settings.h"
++#include "dusk/texture_pack_import.hpp"
++#include "dusk/texture_replacements.hpp"
++#include <aurora/texture.hpp>
++#include <borealis/io.hpp>
++#include <atomic>
++#include <chrono>
++#include <memory>
++#include <string>
++#include <thread>
++#include <utility>
++
++namespace dusk::ui {
++namespace {
++namespace packs = texture_packs;
++
++void show_message(std::string title, std::string message) {
++    push_document(std::make_unique<Modal>(Modal::Props{
++        .title = std::move(title), .bodyText = std::move(message),
++        .actions = {{.label = "OK", .onPressed = [](Modal& modal) { modal.pop(); }}},
++    }));
++}
++
++// A completed, inactive import is selected only on the UI/render thread.
++// Existing texture_replacements files and prior imported packs are never erased.
++void activate_pack(const std::string& id, bool enable) {
++    auto& settings = getSettings();
++    const auto previous = settings.backend.importedTexturePack.getValue();
++    const bool previousEnable = settings.game.enableTextureReplacements.getValue();
++    try {
++        settings.backend.importedTexturePack.setValue(id);
++        settings.game.enableTextureReplacements.setValue(enable);
++        // A changed enable switch already reloads through its config callback.
++        if (previousEnable == enable) texture_replacements::reload();
++        if (!config::save_checked()) throw std::runtime_error("Could not save the pack selection to app storage.");
++    } catch (...) {
++        const bool currentEnable = settings.game.enableTextureReplacements.getValue();
++        settings.backend.importedTexturePack.setValue(previous);
++        settings.game.enableTextureReplacements.setValue(previousEnable);
++        if (currentEnable == previousEnable) texture_replacements::reload();
++        throw;
++    }
++}
++
++struct ImportState {
++    packs::ImportProgress progress;
++    packs::ImportResult result;
++    std::string error;
++    bool cancelled = false;
++    std::atomic<bool> done{false}; // publishes result/error to the UI thread
++};
++
++class ImportWindow final : public Modal {
++public:
++    explicit ImportWindow(std::filesystem::path source)
++        : Modal(Props{
++            .title = "Import Texture Pack",
++            .bodyText = "Scanning the selected pack. Keep the USB drive connected.",
++            .actions = {
++                {.label = "Cancel", .onPressed = [this](Modal&) { mState->progress.cancel = true; },
++                 .isDisabled = [this] { return mFinished || mState->progress.cancel.load(); }},
++                {.label = "Close", .onPressed = [](Modal& modal) { modal.pop(); },
++                 .isDisabled = [this] { return !mFinished; }},
++            },
++            .onDismiss = [this](Modal& modal) {
++                if (mFinished) modal.pop();
++                else mState->progress.cancel = true;
++            },
++        }), mState(std::make_shared<ImportState>()) {
++        // No settings, RmlUi or renderer access occurs on the worker thread.
++        mWorker = std::jthread([state = mState, source = std::move(source), root = ConfigPath / "texture_packs"] {
++            try {
++                state->result = packs::import_directory(source, root, state->progress,
++                    [](const std::filesystem::path& file) {
++                        return aurora::texture::parse_replacement_filename(
++                            borealis::io::fs_path_to_string(file.filename())).has_value();
++                    });
++            } catch (const packs::ImportCancelled& e) {
++                state->cancelled = true; state->error = e.what();
++            } catch (const std::exception& e) {
++                state->error = e.what();
++            } catch (...) {
++                state->error = "An unexpected error interrupted the import.";
++            }
++            state->done.store(true, std::memory_order_release);
++        });
++    }
++    ~ImportWindow() override {
++        mState->progress.cancel = true;
++        if (mWorker.joinable()) mWorker.join();
++    }
++    void update() override {
++        Modal::update();
++        if (mFinished) return;
++        if (mState->done.load(std::memory_order_acquire)) {
++            if (mWorker.joinable()) mWorker.join();
++            if (!mState->error.empty()) {
++                set_body_text((mState->cancelled ? "Import cancelled.\n" : "Import failed.\n") +
++                    mState->error + "\nYour previous pack and manually installed textures are unchanged.");
++            } else if (mState->progress.cancel.load()) {
++                // Cancellation may race with completion. The finished copy is
++                // retained but never activated; no previous pack is replaced.
++                set_body_text("Import cancelled. The completed copy was not activated. Your previous pack is unchanged.");
++            } else {
++                try {
++                    activate_pack(mState->result.directory.filename().string(), true);
++                    set_body_text(fmt::format(
++                        "Texture pack imported and enabled: {} files ({}).\n"
++                        "You can now disconnect the USB drive. The selection is saved for next launch.\n"
++                        "Your manual texture folder and earlier imports are kept. Restart the game if a texture has not refreshed.",
++                        mState->result.files, format_bytes(mState->result.bytes)));
++                } catch (const std::exception& e) {
++                    set_body_text(std::string{"The pack was copied but could not be activated. The previous selection was restored.\n"} + e.what());
++                }
++            }
++            mFinished = true;
++            focus();
++            return;
++        }
++        const auto now = std::chrono::steady_clock::now();
++        if (now - mLastUpdate < std::chrono::milliseconds(200)) return;
++        mLastUpdate = now;
++        if (mState->progress.cancel.load()) {
++            set_body_text("Cancelling the import and removing temporary files. Please keep the USB drive connected until this finishes.");
++        } else if (mState->progress.phase.load() == packs::ImportPhase::Copying) {
++            set_body_text(fmt::format("Copying: {} / {} files\n{} / {}\nKeep the USB drive connected. Your previous pack stays active until the import completes.",
++                mState->progress.copiedFiles.load(), mState->progress.totalFiles.load(),
++                format_bytes(mState->progress.copiedBytes.load()), format_bytes(mState->progress.totalBytes.load())));
++        } else {
++            set_body_text(fmt::format("Scanning the selected pack: {} texture files found ({}).\nKeep the USB drive connected. Press Cancel to stop.",
++                mState->progress.totalFiles.load(), format_bytes(mState->progress.totalBytes.load())));
++        }
++    }
++private:
++    std::shared_ptr<ImportState> mState;
++    std::jthread mWorker;
++    std::chrono::steady_clock::time_point mLastUpdate{};
++    bool mFinished = false;
++};
++
++void choose_pack_folder() {
++    file_select::open_folder({.requireRealPath = true}, [](file_select::Result result) {
++        if (result.status == file_select::Status::Canceled) return;
++        if (result.status != file_select::Status::Selected || result.locations.empty()) {
++            show_message("Texture Pack Not Selected", result.message.empty() ? "Could not open the folder browser. Try again." : result.message);
++            return;
++        }
++        const auto source = borealis::io::fs_path_from_utf8(result.locations.front());
++        push_document(std::make_unique<Modal>(Modal::Props{
++            .title = "Import This Texture Pack?",
++            .bodyText = "Selected folder:\n" + borealis::io::fs_path_to_string(source) +
++                "\nPNG/DDS texture files and their subfolders will be copied into app storage and enabled. "
++                "Keep the USB drive connected until the import finishes. ZIP files must be extracted first. "
++                "Existing manual textures and earlier imports are kept, so enough free app storage is required.",
++            .actions = {
++                {.label = "Import", .onPressed = [source](Modal& modal) {
++                    modal.pop();
++                    try { push_document(std::make_unique<ImportWindow>(source)); }
++                    catch (const std::exception& e) { show_message("Cannot Start Import", e.what()); }
++                }},
++                {.label = "Cancel", .onPressed = [](Modal& modal) { modal.pop(); }},
++            },
++        }));
++    });
++}
++}  // namespace
++
++void build_texture_pack_control(Pane& left, Pane& right) {
++    left.register_control(left.add_select_button({
++        .key = "Texture Pack",
++        .getValue = [] {
++            return packs::resolve_directory(ConfigPath, getSettings().backend.importedTexturePack.getValue()) ==
++                ConfigPath / "texture_replacements" ? "Default Folder" : "Imported Pack";
++        },
++    }), right, [](Pane& pane) {
++        pane.add_text("Import an extracted texture pack folder from USB. Use the drive list to choose your USB drive, then select the pack folder and choose 'Use this folder'. Only PNG/DDS replacements are imported; ZIP files are not supported.");
++        pane.add_button("Import Texture Pack from USB...").on_pressed(&choose_pack_folder);
++        pane.add_button("Use Default Texture Folder").on_pressed([] {
++            try {
++                activate_pack({}, true);
++                show_message("Default Texture Folder Selected", "The original texture_replacements folder is active again. Imported packs have not been deleted.");
++            } catch (const std::exception& e) { show_message("Could Not Change Texture Pack", e.what()); }
++        });
++        pane.add_text("The USB source is never changed. Imported packs are stored under texture_packs in app data and are kept as backups; repeated imports use additional storage. You can still use the Enable Texture Replacements switch above.");
++    });
++}
++}  // namespace dusk::ui
++#endif
+diff --git a/src/dusk/ui/texture_pack_menu.hpp b/src/dusk/ui/texture_pack_menu.hpp
+new file mode 100644
+index 0000000..204e524
+--- /dev/null
++++ b/src/dusk/ui/texture_pack_menu.hpp
+@@ -0,0 +1,5 @@
++#pragma once
++namespace dusk::ui {
++class Pane;
++void build_texture_pack_control(Pane& left, Pane& right);
++}
+diff --git a/tests/uwp/run_portable_checks.py b/tests/uwp/run_portable_checks.py
+index 896ac85..1b7f4ed 100644
+--- a/tests/uwp/run_portable_checks.py
++++ b/tests/uwp/run_portable_checks.py
+@@ -1,6 +1,7 @@
+ #!/usr/bin/env python3
+ """Portable regression checks, not an MSVC/UWP build or Xbox runtime test."""
+ import argparse
++import re
+ from pathlib import Path
+ import subprocess
+ import tempfile
+@@ -21,6 +22,7 @@ with tempfile.TemporaryDirectory(prefix='dusk-uwp-checks-') as directory:
+     common = ['g++', '-std=c++20', '-Wall', '-Wextra', '-Werror', '-Wno-missing-field-initializers',
+         '-I', root / 'src', '-I', args.borealis_source / 'include']
+     for test, extra in [('file_select_utils_test', []),
++                        ('texture_pack_import_test', [root / 'src/dusk/texture_pack_import.cpp', '-pthread']),
+                         ('file_select_forwarding_test', [root / 'src/dusk/ui/file_select.cpp'])]:
+         exe = temporary / test
+         run([*common, root / f'tests/uwp/{test}.cpp', *extra, '-o', exe])
+@@ -49,14 +51,20 @@ with tempfile.TemporaryDirectory(prefix='dusk-uwp-checks-') as directory:
+             parser.error('--deps-root also requires --aurora-source')
+         deps = args.deps_root
+         aurora = args.aurora_source
+-        includes = [root / 'include', root / 'src', root / 'sdk/include', root / 'libs/JSystem/include', root / 'assets/GZ2E01',
+-            aurora / 'include', aurora / 'include/dolphin', aurora, args.borealis_source / 'include',
++        generated = temporary / 'generated'
++        (generated / 'borealis').mkdir(parents=True)
++        template = (args.borealis_source / 'cmake/version.h.in').read_text()
++        # A syntax-only header fixture, not production build version metadata.
++        template = re.sub(r'@([A-Z_]+)@', lambda m: '0' if m[1].endswith('VERSION_CODE') else 'syntax-check-only', template)
++        (generated / 'borealis/version.h').write_text(template)
++        includes = [generated, deps / 'cxxopts/include', deps / 'xxhash', root / 'include', root / 'src', root / 'sdk/include', root / 'libs/JSystem/include', root / 'assets/GZ2E01',
++            aurora / 'include', aurora / 'include/dolphin', aurora, aurora.parent, args.borealis_source / 'include',
+             deps / 'sdl/include', deps / 'rmlui/Include', deps / 'fmt/include', deps / 'imgui', deps / 'absl', deps / 'json/include']
+         command = ['g++', '-std=c++20', '-fsyntax-only', '-Wno-multichar', '-Wno-deprecated-declarations', '-Wno-invalid-offsetof',
+             '-D_UWP', '-DAURORA', '-DTARGET_PC=1', '-DWIDESCREEN_SUPPORT=1', '-DAVOID_UB=1', '-DVERSION=0', '-DMTX_USE_PS=1', '-DPARTIAL_DEBUG=1']
+         for include in includes:
+             command += ['-I', include]
+-        command += ['-include', aurora / 'include/dolphin/types.h', '-include', aurora / 'include/dolphin/os.h', '-include', 'global.h']
+-        run([*command, *[root / file for file in ['src/dusk/ui/file_browser.cpp', 'src/dusk/ui/file_select.cpp', 'src/dusk/ui/pane.cpp', 'src/dusk/io.cpp', 'src/dusk/main.cpp']]])
+-        print('PASS: five core translation units pass Linux syntax checking with _UWP. This does NOT cover _WIN32 code or MSVC.')
++        command += ['-include', aurora / 'include/dolphin/types.h', '-include', aurora / 'include/dolphin/os.h', '-include', aurora / 'include/dolphin/pad.h', '-include', 'global.h', '-include', 'dusk/settings.h']
++        run([*command, *[root / file for file in ['src/dusk/ui/texture_pack_menu.cpp', 'src/dusk/texture_replacements.cpp', 'src/dusk/ui/settings.cpp', 'src/dusk/settings.cpp', 'src/dusk/config.cpp', 'src/dusk/ui/file_browser.cpp', 'src/dusk/ui/file_select.cpp', 'src/dusk/ui/pane.cpp', 'src/dusk/io.cpp', 'src/dusk/main.cpp']]])
++        print('PASS: requested core and texture-import translation units pass Linux syntax checking with _UWP. This does NOT cover _WIN32 code or MSVC.')
+ print('PASS: all requested portable checks completed.')
+diff --git a/tests/uwp/texture_pack_import_test.cpp b/tests/uwp/texture_pack_import_test.cpp
+new file mode 100644
+index 0000000..31ebf62
+--- /dev/null
++++ b/tests/uwp/texture_pack_import_test.cpp
+@@ -0,0 +1,148 @@
++#include "dusk/texture_pack_import.hpp"
++#include <cassert>
++#include <chrono>
++#include <fstream>
++#include <iostream>
++#include <thread>
++#include <string>
++
++namespace fs = std::filesystem;
++namespace packs = dusk::texture_packs;
++namespace {
++void write(const fs::path& path, std::string_view data) {
++    fs::create_directories(path.parent_path());
++    std::ofstream out(path, std::ios::binary); out << data;
++    assert(out.good());
++}
++std::string read(const fs::path& path) {
++    std::ifstream in(path, std::ios::binary);
++    return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
++}
++bool valid(const fs::path& path) { return path.filename().string().starts_with("tex1_"); }
++template <class F> void fails(F&& call) {
++    bool failed = false;
++    try { call(); } catch (const std::exception&) { failed = true; }
++    assert(failed);
++}
++size_t entries(const fs::path& path) {
++    if (!fs::exists(path)) return 0;
++    return static_cast<size_t>(std::distance(fs::directory_iterator(path), fs::directory_iterator{}));
++}
++}
++int main() {
++    const auto root = fs::temp_directory_path() /
++        ("dusk-pack-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
++    struct Cleanup { fs::path path; ~Cleanup() { std::error_code ec; fs::remove_all(path, ec); } } cleanup{root};
++    const auto source = root / "USB" / fs::path{u8"HD pack café"};
++    const auto data = root / "LocalState";
++    const auto managed = data / "texture_packs";
++    const auto texture = "tex1_64x64_0123456789abcdef_0.png";
++    write(source / "nested" / texture, "texture-one");
++    write(source / "nested" / "tex1_32x32_123456789abcdef0_0.DDS", "texture-two");
++    write(source / "elsewhere" / texture, "same-name-other-folder");
++    write(source / "README.txt", "documentation is not imported");
++    write(source / "unrelated.zip", "not imported");
++    write(data / "texture_replacements" / "manual.png", "keep my manual pack");
++    packs::ImportProgress progress;
++    const auto result = packs::import_directory(source, managed, progress, valid);
++    assert(result.files == 3 && result.bytes == 44);
++    assert(progress.copiedBytes == result.bytes && progress.copiedFiles == 3);
++    assert(progress.phase == packs::ImportPhase::Complete);
++    assert(read(result.directory / "nested" / texture) == "texture-one");
++    assert(read(result.directory / "elsewhere" / texture) == "same-name-other-folder");
++    assert(!fs::exists(result.directory / "README.txt"));
++    assert(read(source / "nested" / texture) == "texture-one");
++    assert(read(data / "texture_replacements" / "manual.png") == "keep my manual pack");
++    const auto id = result.directory.filename().string();
++    assert(packs::valid_pack_id(id));
++    assert(packs::resolve_directory(data, id) == result.directory);
++    for (const auto* bad : {"../escape", "pack-../x", "pack-1/2", "pack--", "pack-1-2-3", "pack-", "pack-123", ""}) {
++        assert(!packs::valid_pack_id(bad));
++        assert(packs::resolve_directory(data, bad) == data / "texture_replacements");
++    }
++    assert(packs::resolve_directory(data, "pack-1-9999") == data / "texture_replacements");
++
++    // A second import is isolated; no existing pack or manual file is removed.
++    packs::ImportProgress again;
++    const auto second = packs::import_directory(source, managed, again, valid);
++    assert(second.directory != result.directory && entries(managed) == 2);
++    assert(read(result.directory / "nested" / texture) == "texture-one");
++
++    const auto empty = root / "empty";
++    write(empty / "photo.png", "not a replacement filename");
++    packs::ImportProgress invalid;
++    fails([&] { packs::import_directory(empty, managed, invalid, valid); });
++    assert(entries(managed) == 2);
++    fails([&] { packs::import_directory(root / "missing", managed, invalid, valid); });
++    fails([&] { packs::import_directory(source, source / "descendant", invalid, valid); });
++    fails([&] { packs::import_directory(result.directory, managed, invalid, valid); });
++    fails([&] { packs::import_directory(fs::current_path().root_path(), managed, invalid, valid); });
++    fails([&] { packs::import_directory(source, managed, invalid, {}); });
++
++    packs::ImportProgress cancelled;
++    cancelled.cancel = true;
++    fails([&] { packs::import_directory(source, managed, cancelled, valid); });
++    assert(cancelled.phase == packs::ImportPhase::Cancelled && entries(managed) == 2);
++    packs::ImportProgress scanning;
++    fails([&] { packs::import_directory(source, managed, scanning, [&](const fs::path&) {
++        scanning.cancel = true; return true;
++    }); });
++    assert(scanning.phase == packs::ImportPhase::Cancelled && entries(managed) == 2);
++
++    // USB source changed after its scan: fail and clean staging, keep old pack.
++    const auto changing = root / "changing";
++    write(changing / texture, "original-data");
++    packs::ImportProgress changed;
++    fails([&] { packs::import_directory(changing, managed, changed, [&](const fs::path& file) {
++        write(file, "x"); return true;
++    }); });
++    assert(changed.phase == packs::ImportPhase::Failed && entries(managed) == 2);
++
++    // Linked files/directories are not followed, even when targets are internal.
++    const auto linked = root / "linked";
++    write(linked / texture, "original");
++    std::error_code ec;
++    fs::create_symlink(source / "nested" / texture, linked / "alias.png", ec);
++    if (!ec) {
++        packs::ImportProgress links;
++        fails([&] { packs::import_directory(linked, managed, links, valid); });
++        assert(entries(managed) == 2);
++    }
++    fs::remove(linked / "alias.png", ec);
++    fs::create_directory_symlink(source, linked / "linked-folder", ec);
++    if (!ec) {
++        packs::ImportProgress links;
++        fails([&] { packs::import_directory(linked, managed, links, valid); });
++        assert(entries(managed) == 2);
++    }
++
++    // Cancel a real chunked copy rather than only cancelling before it starts.
++    const auto large = root / "large";
++    write(large / texture, "x");
++    fs::resize_file(large / texture, 256ULL * 1024 * 1024);
++    packs::ImportProgress copying;
++    std::atomic<bool> finished{false}, caughtCancel{false};
++    std::jthread worker([&] {
++        try { packs::import_directory(large, managed, copying, valid); }
++        catch (const packs::ImportCancelled&) { caughtCancel = true; }
++        catch (const std::exception&) { assert(false && "unexpected copy failure"); }
++        finished = true;
++    });
++    while (!copying.copiedBytes.load() && !finished.load()) std::this_thread::yield();
++    copying.cancel = true;
++    worker.join();
++    assert(caughtCancel && copying.phase == packs::ImportPhase::Cancelled);
++    assert(entries(managed) == 2);
++
++#if !defined(_WIN32)
++    // Sparse logical size permits a deterministic free-space failure without
++    // allocating the full data. Windows' resize behavior is intentionally skipped.
++    const auto huge = root / "huge";
++    write(huge / texture, "x");
++    fs::resize_file(huge / texture, fs::space(managed).available + 16ULL * 1024 * 1024);
++    packs::ImportProgress space;
++    fails([&] { packs::import_directory(huge, managed, space, valid); });
++    assert(space.phase == packs::ImportPhase::Failed && entries(managed) == 2);
++#endif
++    std::cout << "PASS: nested/Unicode import, progress, persistent selection paths, non-destructive repeat import, invalid packs, overlap/root/ID rejection, scan/copy cancellation, USB changes, links, cleanup and storage preflight.\n";
++}

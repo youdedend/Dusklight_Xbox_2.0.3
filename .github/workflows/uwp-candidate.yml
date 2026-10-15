@@ -41,7 +41,7 @@ jobs:
           Git-Checked -C $Game fetch (Join-Path $Inputs 'dusklight.bundle') refs/heads/uwp-2.0.3:refs/heads/uwp-2.0.3
           Git-Checked -C $Game switch uwp-2.0.3
           $GameCommit = (& git -C $Game rev-parse HEAD).Trim()
-          if ($GameCommit -ne '38163deeb11936fe4b3d7ecac755bc0a5b642cc0') { throw "Unexpected game commit: $GameCommit" }
+          if ($GameCommit -ne '5ea6f987db5f20fdf55befc2ada4f44bf314764f') { throw "Unexpected game commit: $GameCommit" }
           Git-Checked -C $Game submodule update --init --recursive extern/borealis mods/cosmetics mods/randomizer
           $Aurora = Join-Path $Game 'extern/aurora'
           Git-Checked clone --no-checkout https://github.com/encounter/aurora.git $Aurora
@@ -65,7 +65,18 @@ jobs:
             if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw 'MSVC developer environment initialization failed.' }
             cmake --version
             ninja --version
-            & (Join-Path $env:GITHUB_WORKSPACE 'game/platforms/uwp/Build-Uwp.ps1') -GenerateUnsignedPackage
+            $Game = Join-Path $env:GITHUB_WORKSPACE 'game'
+            $TestExe = Join-Path $env:RUNNER_TEMP 'texture-pack-import-test.exe'
+            Push-Location $env:RUNNER_TEMP
+            try {
+              & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /I"$Game/src" `
+                (Join-Path $Game 'tests/uwp/texture_pack_import_test.cpp') `
+                (Join-Path $Game 'src/dusk/texture_pack_import.cpp') /Fe:$TestExe 2>&1 | ForEach-Object { Write-Host $_ }
+              if ($LASTEXITCODE -ne 0) { throw "Texture importer regression test compilation failed: $LASTEXITCODE" }
+              & $TestExe 2>&1 | ForEach-Object { Write-Host $_ }
+              if ($LASTEXITCODE -ne 0) { throw "Texture importer regression tests failed: $LASTEXITCODE" }
+            } finally { Pop-Location }
+            & (Join-Path $Game 'platforms/uwp/Build-Uwp.ps1') -GenerateUnsignedPackage
           } finally {
             Stop-Transcript
           }
