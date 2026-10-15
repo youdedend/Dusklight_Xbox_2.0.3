@@ -41,7 +41,7 @@ jobs:
           Git-Checked -C $Game fetch (Join-Path $Inputs 'dusklight.bundle') refs/heads/uwp-2.0.3:refs/heads/uwp-2.0.3
           Git-Checked -C $Game switch uwp-2.0.3
           $GameCommit = (& git -C $Game rev-parse HEAD).Trim()
-          if ($GameCommit -ne 'f8e47623e91d6010cbf6e853580c97294e7ffcc7') { throw "Unexpected game commit: $GameCommit" }
+          if ($GameCommit -ne '38163deeb11936fe4b3d7ecac755bc0a5b642cc0') { throw "Unexpected game commit: $GameCommit" }
           Git-Checked -C $Game submodule update --init --recursive extern/borealis mods/cosmetics mods/randomizer
           $Aurora = Join-Path $Game 'extern/aurora'
           Git-Checked clone --no-checkout https://github.com/encounter/aurora.git $Aurora
@@ -81,6 +81,7 @@ jobs:
             game/cmake-build-uwp/CMakeCache.txt
             game/cmake-build-uwp/CMakeFiles/CMakeConfigureLog.yaml
             game/cmake-build-uwp/uwp_link_libs_*.txt
+            game/cmake-build-uwp/uwp_link_options_*.txt
             game/cmake-build-uwp/uwp_dependency_revision.txt
             game/cmake-build-uwp-host/CMakeCache.txt
             game/cmake-build-uwp-host/CMakeFiles/CMakeConfigureLog.yaml
