@@ -41,6 +41,12 @@ jobs:
       - name: Build
         run: cmake --build --preset windows-msvc-relwithdebinfo-uwp
 
+      - name: Configure UWP host
+        run: cmake -S platforms/uwp -B build/uwp-host -G "Visual Studio 18 2026" -A x64 -DDUSK_DIR="${{ github.workspace }}/build/windows-msvc-relwithdebinfo-uwp"
+
+      - name: Build UWP host
+        run: cmake --build build/uwp-host --config RelWithDebInfo
+
       - name: Upload build output
         if: always()
         uses: actions/upload-artifact@v7
