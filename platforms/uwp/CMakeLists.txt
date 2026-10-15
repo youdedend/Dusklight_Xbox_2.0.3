@@ -130,9 +130,7 @@ set(BinLibs
 	ntdll.lib
 )
 
-# aurora_core/system_info.cpp still references WMI (IWbemLocator, _com_issue_error); the
-# aurora revision pinned by the main tree does not gate it for Windows Store builds yet.
-target_link_libraries(${PROJECT_NAME} PRIVATE ${DUSK_STATIC_LIBS} ${BinLibs} wbemuuid comsuppw)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${DUSK_STATIC_LIBS} ${BinLibs})
 
 if(MSVC)
 	target_link_options(${PROJECT_NAME} PRIVATE
